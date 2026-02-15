@@ -1,6 +1,6 @@
-﻿# Jira Filler
+﻿# Personal assistant
 
-Jira Filler - локальный Go-сервис, который принимает сообщения, отправляет их в OpenRouter и при необходимости выполняет действия в Jira через tool calls.
+Personal assistant - локальный Go-сервис, который принимает сообщения, отправляет их в OpenRouter и при необходимости выполняет действия в Jira через tool calls.
 
 [English version](README.md)
 

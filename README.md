@@ -1,6 +1,6 @@
-﻿# Jira Filler
+﻿# Personal assistant
 
-Jira Filler is a local Go service that accepts chat requests, calls OpenRouter, and executes Jira actions via tool calls.
+Personal assistant is a local Go service that accepts chat requests, calls OpenRouter, and executes Jira actions via tool calls.
 
 [Русская версия](README.ru.md)
 
