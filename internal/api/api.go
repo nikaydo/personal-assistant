@@ -53,7 +53,7 @@ func SetupApi(config config.Config, log *logg.Logger) (API, error) {
 }
 
 func (api *API) fillAiToolParam() error {
-	if err := api.Ai.Jira.GetUserInfo(); err != nil {
+	if err := api.Ai.Jira.GetUserInfo(api.Ai.Config.JiraPersonalUrl); err != nil {
 		return err
 	}
 	api.Ai.ToolConf = &ai.ToolConf{
@@ -67,6 +67,5 @@ func (api *API) Start() error {
 }
 
 func (api *API) SetupRoutes() {
-	api.Router.Get("/chat", api.chat)
-	api.Router.Get("/memory", api.GetMemory)
+	api.Router.Post("/chat", api.chat)
 }

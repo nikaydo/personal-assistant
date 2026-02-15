@@ -27,8 +27,8 @@ type AvatarURLs struct {
 	Size32 string `json:"32x32"`
 }
 
-func (j *Jira) GetUserInfo() error {
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://narria.atlassian.net/rest/api/3/user/search?query=%s", j.Email), nil)
+func (j *Jira) GetUserInfo(url string) error {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/rest/api/3/user/search?query=%s", url, j.Email), nil)
 	if err != nil {
 		return err
 	}

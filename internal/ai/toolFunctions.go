@@ -9,8 +9,12 @@ import (
 )
 
 func (ai *Ai) createProjectJira(resp mod.ResponseBody) (string, error) {
+	tc, err := firstToolCall(resp)
+	if err != nil {
+		return "", err
+	}
 	var pj *models.ProjectPayloadScheme
-	if err := json.Unmarshal([]byte(resp.Choices[0].Message.ToolCalls[0].Function.Arguments), &pj); err != nil {
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &pj); err != nil {
 		return "", err
 	}
 	projectScheme, responseScheme, err := ai.Jira.CreateProject(pj)
@@ -22,8 +26,12 @@ func (ai *Ai) createProjectJira(resp mod.ResponseBody) (string, error) {
 	return fmt.Sprintf("function return: %+v. with result data: %+v", projectScheme, responseScheme), nil
 }
 func (ai *Ai) searchProjectJira(resp mod.ResponseBody) (string, error) {
+	tc, err := firstToolCall(resp)
+	if err != nil {
+		return "", err
+	}
 	var pj mod.ProjectSearchOptions
-	if err := json.Unmarshal([]byte(resp.Choices[0].Message.ToolCalls[0].Function.Arguments), &pj); err != nil {
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &pj); err != nil {
 		return "", err
 	}
 	opt := &models.ProjectSearchOptionsScheme{
@@ -49,10 +57,14 @@ func (ai *Ai) searchProjectJira(resp mod.ResponseBody) (string, error) {
 }
 
 func (ai *Ai) deleteProjectJira(resp mod.ResponseBody) (string, error) {
+	tc, err := firstToolCall(resp)
+	if err != nil {
+		return "", err
+	}
 	var pj struct {
 		ProjectKeyOrID string `json:"projectKeyOrID"`
 	}
-	if err := json.Unmarshal([]byte(resp.Choices[0].Message.ToolCalls[0].Function.Arguments), &pj); err != nil {
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &pj); err != nil {
 		return "", err
 	}
 	responseScheme, err := ai.Jira.DeleteProject(pj.ProjectKeyOrID)
