@@ -1,6 +1,6 @@
 package chat
 
-import "github.com/nikaydo/jira-filler/internal/models/tool"
+import "github.com/nikaydo/personal-assistant/internal/models/tool"
 
 type Message struct {
 	Role       string          `json:"role"`

@@ -1,0 +1,17 @@
+2026-02-18 12:42:07 INFO [SYSTEM] Starting application
+2026-02-18 12:42:07 INFO [SYSTEM] Config loaded
+2026-02-18 12:42:07 INFO [API] Initializing integrations
+2026-02-18 12:42:07 INFO [SERVICE] jira successful auth
+2026-02-18 12:42:07 INFO [DB] Initializing database client
+2026-02-18 12:42:07 INFO [DB] Index is ready
+2026-02-18 12:42:07 INFO [DB] Database index ready
+2026-02-18 12:42:07 INFO [API] Core services initialized
+2026-02-18 12:42:07 INFO [AI] Loading Jira user profile for tool configuration
+2026-02-18 12:42:08 INFO [AI] Tool configuration loaded | {"jira_account_id":"712020:622aecc0-401f-4845-834b-63a9e7cd835e"}
+2026-02-18 12:42:08 INFO [API] Server configured on addr localhost:8080
+2026-02-18 12:42:08 INFO [AI] Loading model metadata
+2026-02-18 12:42:10 INFO [AI] Model found | {"model":"openai/gpt-4o-mini"}
+2026-02-18 12:42:10 INFO [AI] Context length: 123000
+2026-02-18 12:42:10 INFO [API] Routes setup
+2026-02-18 12:42:10 INFO [SYSTEM] Server starting on addr localhost:8080
+2026-02-18 12:42:10 INFO [SYSTEM] Ready

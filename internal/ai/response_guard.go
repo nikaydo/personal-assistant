@@ -3,7 +3,7 @@ package ai
 import (
 	"fmt"
 
-	mod "github.com/nikaydo/jira-filler/internal/models"
+	mod "github.com/nikaydo/personal-assistant/internal/models"
 )
 
 func firstChoice(resp mod.ResponseBody) (mod.Message, error) {

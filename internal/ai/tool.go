@@ -1,6 +1,6 @@
 package ai
 
-import "github.com/nikaydo/jira-filler/internal/models"
+import "github.com/nikaydo/personal-assistant/internal/models"
 
 type ToolConf struct {
 	AccountId string `json:"account_id,omitempty"`
@@ -21,9 +21,7 @@ func GetToolRouter() []models.Tool {
 							"enum": []string{
 								"jira",
 							},
-							"description_map": map[string]string{
-								"jira": "Tool for tracking tasks in Jira. include only functions for creating project, searching projects and deleting projects.",
-							},
+							"description": "Tool group. Use 'jira' for creating, searching, and deleting Jira projects.",
 						},
 					},
 					"required": []string{"group"},
@@ -123,10 +121,10 @@ func GetToolsJira(conf ToolConf) []models.Tool {
 						},
 						"key": map[string]any{
 							"type":        "string",
-							"description": "The key of the project.",
+							"description": "The key of the project in upper case without any symbols like '-' ',' '.' .",
 						},
 						"categoryId": map[string]any{
-							"type":        "int",
+							"type":        "integer",
 							"description": "The category ID of the project.",
 						},
 					},
@@ -176,7 +174,7 @@ func GetToolsJira(conf ToolConf) []models.Tool {
 									},
 								},
 								"categoryid": map[string]any{
-									"type":        "int",
+									"type":        "integer",
 									"description": "The ID of the project's category. A complete list of category IDs is found using the Get all project categories operation.",
 								},
 								"action": map[string]any{
@@ -186,11 +184,11 @@ func GetToolsJira(conf ToolConf) []models.Tool {
 							},
 						},
 						"startAt": map[string]any{
-							"type":        "int",
+							"type":        "integer",
 							"description": "The index of the first project to return in the results.",
 						},
 						"maxResults": map[string]any{
-							"type":        "int",
+							"type":        "integer",
 							"description": "The maximum number of projects to return in the results.",
 						},
 					},

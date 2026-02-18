@@ -1,10 +1,10 @@
 package models
 
 import (
-	chatmodels "github.com/nikaydo/jira-filler/internal/models/chat"
-	jiramodels "github.com/nikaydo/jira-filler/internal/models/jira"
-	openroutermodels "github.com/nikaydo/jira-filler/internal/models/openrouter"
-	toolmodels "github.com/nikaydo/jira-filler/internal/models/tool"
+	chatmodels "github.com/nikaydo/personal-assistant/internal/models/chat"
+	jiramodels "github.com/nikaydo/personal-assistant/internal/models/jira"
+	openroutermodels "github.com/nikaydo/personal-assistant/internal/models/openrouter"
+	toolmodels "github.com/nikaydo/personal-assistant/internal/models/tool"
 )
 
 type Tool = toolmodels.Tool
@@ -25,6 +25,15 @@ type ModelArchitecture = openroutermodels.ModelArchitecture
 type TopProvider = openroutermodels.TopProvider
 type DefaultParameters = openroutermodels.DefaultParameters
 type ModelData = openroutermodels.ModelData
+type EmbendingResponse = openroutermodels.EmbendingResponse
+type ToolsChoise = openroutermodels.ToolsChoise
+type ToolsChoisePayload = openroutermodels.ToolsChoisePayload
+
+type Choices = openroutermodels.Choices
+type Usage = openroutermodels.Usage
+type PromptTokensDetails = openroutermodels.PromptTokensDetails
+type CostDetails = openroutermodels.CostDetails
+type CompletionTokensDetails = openroutermodels.CompletionTokensDetails
 
 type ProjectSearchOptions = jiramodels.ProjectSearchOptions
 type ProjectSearchOptionsScheme = jiramodels.ProjectSearchOptionsScheme

@@ -3,7 +3,7 @@ package jira
 import (
 	v3 "github.com/ctreminiom/go-atlassian/v2/jira/v3"
 	"github.com/ctreminiom/go-atlassian/v2/pkg/infra/models"
-	"github.com/nikaydo/jira-filler/internal/logg"
+	"github.com/nikaydo/personal-assistant/internal/logg"
 )
 
 type Jira struct {
@@ -33,6 +33,7 @@ func NewJira(email, apiToken, host string, log *logg.Logger) (*Jira, error) {
 		return nil, err
 	}
 	log.Info("jira successful auth")
+
 	return j, nil
 }
 

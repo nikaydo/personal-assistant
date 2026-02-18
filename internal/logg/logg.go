@@ -2,27 +2,43 @@ package logg
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
-	"reflect"
+	"regexp"
 	"strings"
-
-	"github.com/fatih/color"
+	"time"
 )
 
 var (
-	fieldColor = color.New(color.FgCyan, color.Bold)
-	typeColor  = color.New(color.FgHiBlack)
-	nilColor   = color.New(color.FgHiBlack)
-
 	TaskLevel     = -2
 	AnswerLevel   = -1
 	QuestionLevel = 1
 	ErrorLevel    = 2
 	MemoryLevel   = 3
 )
+
+type teeWriter struct {
+	console io.Writer
+	file    io.Writer
+}
+
+var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func (t *teeWriter) Write(p []byte) (int, error) {
+	if _, err := t.console.Write(p); err != nil {
+		return 0, err
+	}
+
+	clean := ansiRegexp.ReplaceAll(p, []byte{})
+	if _, err := t.file.Write(clean); err != nil {
+		return 0, err
+	}
+
+	return len(p), nil
+}
 
 type ColorHandler struct {
 	w     io.Writer
@@ -35,37 +51,72 @@ type Logger struct {
 	Customlogger *slog.Logger
 }
 
+func (l *Logger) WithModule(module string) *Logger {
+	module = strings.ToUpper(strings.TrimSpace(module))
+	if module == "" {
+		return l
+	}
+
+	return &Logger{
+		Customlogger: l.Customlogger.With(slog.String("module", module)),
+	}
+}
+
 func (l *Logger) Task(t string, msg ...any) {
-	l.Customlogger.LogAttrs(context.Background(), slog.Level(TaskLevel), ColorStruct(msg), slog.String("type", t))
+	message, attrs := normalizeLogArgs(msg...)
+	attrs = append(attrs, slog.String("type", t))
+	l.Customlogger.LogAttrs(context.Background(), slog.Level(TaskLevel), message, attrs...)
 }
 
 func (l *Logger) Memory(msg ...any) {
-	l.Customlogger.LogAttrs(context.Background(), slog.Level(MemoryLevel), ColorStruct(msg))
+	message, attrs := normalizeLogArgs(msg...)
+	l.Customlogger.LogAttrs(context.Background(), slog.Level(MemoryLevel), message, attrs...)
 }
 
 func (l *Logger) Answer(msg any) {
-	l.Customlogger.LogAttrs(context.Background(), slog.Level(AnswerLevel), ColorStruct(msg))
+	message, attrs := normalizeLogArgs(msg)
+	l.Customlogger.LogAttrs(context.Background(), slog.Level(AnswerLevel), message, attrs...)
 }
 
 func (l *Logger) Question(msg any) {
-	l.Customlogger.LogAttrs(context.Background(), slog.Level(QuestionLevel), ColorStruct(msg))
+	message, attrs := normalizeLogArgs(msg)
+	l.Customlogger.LogAttrs(context.Background(), slog.Level(QuestionLevel), message, attrs...)
 }
 
 func (l *Logger) Info(msg ...any) {
-	var parts []string
-	for _, m := range msg {
-		parts = append(parts, ColorStruct(m))
-	}
-	l.Customlogger.LogAttrs(context.Background(), slog.LevelInfo, ColorStruct(strings.Join(parts, " ")))
+	message, attrs := normalizeLogArgs(msg...)
+	l.Customlogger.LogAttrs(context.Background(), slog.LevelInfo, message, attrs...)
 }
 
-func (l *Logger) Error(msg any) {
-	l.Customlogger.LogAttrs(context.Background(), slog.Level(ErrorLevel), ColorStruct(msg))
+func (l *Logger) Warn(msg ...any) {
+	message, attrs := normalizeLogArgs(msg...)
+	l.Customlogger.LogAttrs(context.Background(), slog.LevelWarn, message, attrs...)
+}
+
+func (l *Logger) Debug(msg ...any) {
+	message, attrs := normalizeLogArgs(msg...)
+	l.Customlogger.LogAttrs(context.Background(), slog.LevelDebug, message, attrs...)
+}
+
+func (l *Logger) Error(msg ...any) {
+	message, attrs := normalizeLogArgs(msg...)
+	l.Customlogger.LogAttrs(context.Background(), slog.Level(ErrorLevel), message, attrs...)
 }
 
 func InitLogger() *Logger {
+	writer := io.Writer(os.Stdout)
+	logFileName := time.Now().Format("2006-01-02_15-04-05") + ".log"
+
+	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err == nil {
+		writer = &teeWriter{
+			console: os.Stdout,
+			file:    logFile,
+		}
+	}
+
 	return &Logger{
-		Customlogger: slog.New(NewColorHandler(os.Stdout, slog.LevelDebug)),
+		Customlogger: slog.New(NewColorHandler(writer, slog.LevelDebug)),
 	}
 }
 
@@ -81,24 +132,38 @@ func (h *ColorHandler) Enabled(_ context.Context, level slog.Level) bool {
 }
 
 func (h *ColorHandler) Handle(_ context.Context, r slog.Record) error {
-	level := colorizeLevel(r.Level)
-
-	// время
-	timeStr := color.New(color.FgCyan).Sprint(
-		r.Time.Format("2006-01-02 15:04:05"),
-	)
-
-	// сообщение
-	msg := r.Message
-
-	// атрибуты
-	attrs := ""
+	allAttrs := make([]slog.Attr, 0, len(h.attrs)+r.NumAttrs())
+	allAttrs = append(allAttrs, h.attrs...)
 	r.Attrs(func(a slog.Attr) bool {
-		attrs += a.Key + "=" + a.Value.String() + " "
+		allAttrs = append(allAttrs, a)
 		return true
 	})
 
-	_, err := io.WriteString(h.w, timeStr+" "+level+" "+msg+" "+attrs+"\n")
+	module := "SYSTEM"
+	fields := make(map[string]any, len(allAttrs))
+	level := levelName(r.Level)
+
+	for _, a := range allAttrs {
+		if a.Key == "module" {
+			module = strings.ToUpper(strings.TrimSpace(fmt.Sprint(a.Value.Any())))
+			continue
+		}
+		fields[a.Key] = a.Value.Any()
+	}
+
+	line := fmt.Sprintf(
+		"%s %s %s %s",
+		r.Time.Format("2006-01-02 15:04:05"),
+		colorLevel(level, r.Level),
+		colorModule(module),
+		formatMessage(r.Message),
+	)
+
+	if len(fields) > 0 {
+		line += " | " + formatFieldsJSON(fields)
+	}
+
+	_, err := io.WriteString(h.w, line+"\n")
 	return err
 }
 
@@ -124,121 +189,134 @@ func (h *ColorHandler) WithGroup(name string) slog.Handler {
 	}
 }
 
-func colorizeLevel(level slog.Level) string {
+func levelName(level slog.Level) string {
 	switch {
 	case level == slog.LevelWarn:
-		return color.New(color.FgYellow, color.Bold).Sprint("WARN ")
+		return "WARN"
 	case level == slog.LevelInfo:
-		return color.New(color.FgGreen).Sprint("INFO ")
+		return "INFO"
 	case level == slog.Level(TaskLevel):
-		return color.New(color.BgMagenta).Sprint("TASK")
+		return "TASK"
 	case level == slog.Level(QuestionLevel):
-		return color.New(color.FgHiBlue).Sprint("QUESTION ")
+		return "QUESTION"
 	case level == slog.Level(AnswerLevel):
-		return color.New(color.FgHiGreen).Sprint("ANSWER ")
+		return "ANSWER"
 	case level == slog.Level(ErrorLevel):
-		return color.New(color.FgHiRed).Sprint("ERROR ")
+		return "ERROR"
 	case level == slog.Level(MemoryLevel):
-		return color.New(color.FgYellow).Sprint("MEMORY ")
+		return "MEMORY"
 	default:
-		return color.New(color.FgHiBlack).Sprint("DEBUG")
+		return "DEBUG"
 	}
 }
 
-func ColorStruct(v any) string {
-	return formatValue(reflect.ValueOf(v))
-}
-
-func formatValue(v reflect.Value) string {
-	if !v.IsValid() {
-		return nilColor.Sprint("nil")
-	}
-
-	if v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return nilColor.Sprint("nil")
-		}
-		return formatValue(v.Elem())
-	}
-
-	switch v.Kind() {
-
-	case reflect.Struct:
-		return formatStruct(v)
-
-	case reflect.String:
-		return color.BlackString("%s", v.String())
-
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return color.YellowString("%d", v.Int())
-
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return color.YellowString("%d", v.Uint())
-
-	case reflect.Float32, reflect.Float64:
-		return color.YellowString("%f", v.Float())
-
-	case reflect.Bool:
-		return color.MagentaString("%t", v.Bool())
-
-	case reflect.Slice, reflect.Array:
-		return formatSlice(v)
-
-	case reflect.Map:
-		return formatMap(v)
-
+func colorLevel(level string, slogLevel slog.Level) string {
+	switch {
+	case slogLevel == slog.LevelWarn:
+		return "\x1b[33m" + level + "\x1b[0m"
+	case slogLevel == slog.LevelInfo:
+		return "\x1b[36m" + level + "\x1b[0m"
+	case slogLevel == slog.Level(TaskLevel):
+		return "\x1b[35m" + level + "\x1b[0m"
+	case slogLevel == slog.Level(QuestionLevel):
+		return "\x1b[34m" + level + "\x1b[0m"
+	case slogLevel == slog.Level(AnswerLevel):
+		return "\x1b[32m" + level + "\x1b[0m"
+	case slogLevel == slog.Level(ErrorLevel):
+		return "\x1b[31m" + level + "\x1b[0m"
+	case slogLevel == slog.Level(MemoryLevel):
+		return "\x1b[96m" + level + "\x1b[0m"
 	default:
-		return fmt.Sprintf("%v", v.Interface())
+		return "\x1b[90m" + level + "\x1b[0m"
 	}
 }
 
-func formatStruct(v reflect.Value) string {
-	t := v.Type()
+func colorModule(module string) string {
+	return "\x1b[1m[" + module + "]\x1b[0m"
+}
 
-	var parts []string
+func formatMessage(msg string) string {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return "-"
+	}
+	return msg
+}
 
-	for i := 0; i < v.NumField(); i++ {
-		fieldType := t.Field(i)
-		fieldVal := v.Field(i)
+func formatFieldsJSON(fields map[string]any) string {
+	data, err := json.Marshal(fields)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
 
-		if !fieldVal.CanInterface() {
-			continue
-		}
+func formatValueForLog(v any) string {
+	if v == nil {
+		return "nil"
+	}
 
-		if fieldVal.IsZero() {
-			continue
-		}
+	switch val := v.(type) {
+	case string:
+		return strconvQuote(val)
+	case error:
+		return strconvQuote(val.Error())
+	}
 
-		name := fieldType.Name
+	data, err := json.Marshal(v)
+	if err == nil {
+		return string(data)
+	}
 
-		if tag := fieldType.Tag.Get("json"); tag != "" {
-			name = strings.Split(tag, ",")[0]
-			if name == "-" {
+	return strconvQuote(fmt.Sprintf("%+v", v))
+}
+
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+func normalizeLogArgs(args ...any) (string, []slog.Attr) {
+	if len(args) == 0 {
+		return "", nil
+	}
+
+	msg := ""
+	start := 0
+	if first, ok := args[0].(string); ok {
+		msg = first
+		start = 1
+	}
+
+	attrs := make([]slog.Attr, 0, len(args)/2+1)
+	dataIndex := 1
+
+	for i := start; i < len(args); {
+		if i+1 < len(args) {
+			if key, ok := args[i].(string); ok && isFieldKey(key) {
+				attrs = append(attrs, slog.Any(key, args[i+1]))
+				i += 2
 				continue
 			}
 		}
 
-		part := fieldColor.Sprint(name) + "=" + formatValue(fieldVal)
-		parts = append(parts, part)
+		if err, ok := args[i].(error); ok {
+			attrs = append(attrs, slog.String("error", err.Error()))
+		} else {
+			key := "data"
+			if dataIndex > 1 || len(args[start:]) > 1 {
+				key = fmt.Sprintf("data%d", dataIndex)
+			}
+			attrs = append(attrs, slog.Any(key, args[i]))
+			dataIndex++
+		}
+		i++
 	}
 
-	return typeColor.Sprint(t.Name()) + "{" + strings.Join(parts, " ") + "}"
+	return msg, attrs
 }
 
-func formatSlice(v reflect.Value) string {
-	var items []string
-	for i := 0; i < v.Len(); i++ {
-		items = append(items, formatValue(v.Index(i)))
-	}
-	return color.BlueString("[%s]", strings.Join(items, ", "))
-}
-
-func formatMap(v reflect.Value) string {
-	var items []string
-	for _, key := range v.MapKeys() {
-		k := formatValue(key)
-		val := formatValue(v.MapIndex(key))
-		items = append(items, k+":"+val)
-	}
-	return color.BlueString("{%s}", strings.Join(items, ", "))
+func isFieldKey(s string) bool {
+	s = strings.TrimSpace(s)
+	return s != "" && !strings.Contains(s, " ")
 }

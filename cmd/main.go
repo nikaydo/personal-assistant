@@ -2,35 +2,45 @@ package main
 
 import (
 	"fmt"
-	"log"
 
 	_ "github.com/ctreminiom/go-atlassian/v2/jira/v3"
-	"github.com/nikaydo/jira-filler/internal/api"
-	"github.com/nikaydo/jira-filler/internal/config"
-	"github.com/nikaydo/jira-filler/internal/logg"
+	"github.com/nikaydo/personal-assistant/internal/api"
+	"github.com/nikaydo/personal-assistant/internal/config"
+	"github.com/nikaydo/personal-assistant/internal/logg"
 )
 
 func main() {
+	l := logg.InitLogger()
+	systemLog := l.WithModule("SYSTEM")
+	apiLog := l.WithModule("API")
+	aiLog := l.WithModule("AI")
+
+	systemLog.Info("Starting application")
 	config, err := config.ConfigRead("./settings.json")
 	if err != nil {
-		log.Fatal("Failed to read config:", err)
+		systemLog.Error("Failed to read config:", err)
+		return
 	}
-	l := logg.InitLogger()
-	l.Info("Config readed")
-	api, err := api.SetupApi(*config, l)
+	systemLog.Info("Config loaded")
+
+	api, err := api.SetupApi(*config, apiLog)
 	if err != nil {
-		log.Fatal("Failed to setup api:", err)
+		apiLog.Error("Failed to setup api:", err)
+		return
 	}
-	l.Info(fmt.Sprintf("Server configurated on addr %s:%d", config.ApiHost, config.ApiPort))
-	api.Ai.GetModelData(*config, l)
-	l.Info(fmt.Sprintf("Context length: %d", api.Ai.Context.ContextLeghtMax))
-	l.Info(fmt.Sprintf("Main model is: %s. Spare models: %v", api.Ai.Model[0], api.Ai.Model[1:]))
+	apiLog.Info(fmt.Sprintf("Server configured on addr %s:%d", config.ApiHost, config.ApiPort))
+
+	aiLog.Info("Loading model metadata")
+	api.Ai.GetModelData()
+	aiLog.Info(fmt.Sprintf("Context length: %d", api.Ai.Context.ContextLeghtMax))
 	api.SetupRoutes()
-	l.Info("Routes setup")
-	l.Info(fmt.Sprintf("Server started on addr %s:%d", config.ApiHost, config.ApiPort))
-	l.Info("Ready!!!")
+	apiLog.Info("Routes setup")
+	systemLog.Info(fmt.Sprintf("Server starting on addr %s:%d", config.ApiHost, config.ApiPort))
+	systemLog.Info("Ready")
 	err = api.Start()
 	if err != nil {
-		panic(err)
+		systemLog.Error("Server start failed:", err)
+		return
 	}
+
 }

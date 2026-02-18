@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"slices"
 
-	mod "github.com/nikaydo/jira-filler/internal/models"
+	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
+	mod "github.com/nikaydo/personal-assistant/internal/models"
 )
 
 var PojectFunc []string = []string{
@@ -14,12 +15,9 @@ var PojectFunc []string = []string{
 }
 
 func (ai *Ai) JiraTasks(q mod.Message) (mod.ResponseBody, error) {
-	msg := ai.makeMessage(ai.Config.PromtSystemChat)
-	msg = append(msg, q)
-
-	resp, err := ai.Ask(msg, GetToolsJira(*ai.ToolConf))
+	resp, err := llmcalls.Ask(ai.makeBody(ai.Memory.HistoryMessage(q, ai.Config.PromtSystemChat), GetToolsJira(*ai.ToolConf)), ai.Config)
 	if err != nil {
-		ai.Logger.Error(fmt.Sprintf("jira tasks ask failed: %v", err))
+		ai.Logger.Error("JiraTasks: ask failed:", err)
 		return mod.ResponseBody{}, err
 	}
 	ai.Logger.Task("JiraTasks", resp)
@@ -29,29 +27,33 @@ func (ai *Ai) JiraTasks(q mod.Message) (mod.ResponseBody, error) {
 		if msgErr == nil && msgChoice.Content != "" {
 			return resp, nil
 		}
-		ai.Logger.Error(err.Error())
+		ai.Logger.Error("JiraTasks: firstToolCall failed:", err)
 		return mod.ResponseBody{}, err
 	}
 
-	//check if function exist in project
 	if slices.Contains(PojectFunc, tc.Function.Name) {
 		r, err := ai.JiraTasksProject(q, resp)
 		if err != nil {
-			ai.Logger.Error(fmt.Sprintf("jira project tool failed: %v", err))
+			ai.Logger.Error("JiraTasks: jira project tool failed:", err)
 			return mod.ResponseBody{}, err
 		}
 		return r, nil
 	}
 
 	err = fmt.Errorf("unsupported jira tool function: %s", tc.Function.Name)
-	ai.Logger.Error(err.Error())
+	ai.Logger.Error("JiraTasks:", err)
 	return mod.ResponseBody{}, err
 }
 
 func (ai *Ai) JiraTasksProject(q mod.Message, resp mod.ResponseBody) (mod.ResponseBody, error) {
 	tc, err := firstToolCall(resp)
 	if err != nil {
-		ai.Logger.Error(err.Error())
+		ai.Logger.Error("JiraTasksProject: firstToolCall failed:", err)
+		return mod.ResponseBody{}, err
+	}
+	msgChoice, err := firstChoice(resp)
+	if err != nil {
+		ai.Logger.Error("JiraTasksProject: firstChoice failed:", err)
 		return mod.ResponseBody{}, err
 	}
 
@@ -59,10 +61,11 @@ func (ai *Ai) JiraTasksProject(q mod.Message, resp mod.ResponseBody) (mod.Respon
 	case "create_project":
 		r, err := ai.createProjectJira(resp)
 		if err != nil {
-			ai.Logger.Error(fmt.Sprintf("create project jira failed: %v -||||- %+v", err, resp))
+			ai.Logger.Error("JiraTasksProject: create project jira failed:", err, "resp:", resp)
 			return ai.ResponseFailed(fmt.Sprintf("You execute tool create_project in jira and its failed! Param: %+v | Result: %+v", tc.Function.Arguments, r), resp)
 		}
-		resp, err := ai.backAsk(tc.ID, r, q)
+		ai.Logger.Info("Respose from create_project", r)
+		resp, err := ai.backAsk(tc.ID, r, q, msgChoice)
 		if err != nil {
 			return mod.ResponseBody{}, err
 		}
@@ -71,10 +74,11 @@ func (ai *Ai) JiraTasksProject(q mod.Message, resp mod.ResponseBody) (mod.Respon
 	case "search_projects":
 		r, err := ai.searchProjectJira(resp)
 		if err != nil {
-			ai.Logger.Error(fmt.Sprintf("search project jira failed: %v -||||- %+v", err, resp))
+			ai.Logger.Error("JiraTasksProject: search project jira failed:", err, "resp:", resp)
 			return ai.ResponseFailed(fmt.Sprintf("You execute tool search_projects in jira and its failed! Param: %+v | Result: %+v", tc.Function.Arguments, r), resp)
 		}
-		resp, err := ai.backAsk(tc.ID, r, q)
+		ai.Logger.Info("Respose from search_projects", r)
+		resp, err := ai.backAsk(tc.ID, r, q, msgChoice)
 		if err != nil {
 			return mod.ResponseBody{}, err
 		}
@@ -83,10 +87,11 @@ func (ai *Ai) JiraTasksProject(q mod.Message, resp mod.ResponseBody) (mod.Respon
 	case "delete_project":
 		r, err := ai.deleteProjectJira(resp)
 		if err != nil {
-			ai.Logger.Error(fmt.Sprintf("delete project jira failed: %v -||||- %+v", err, resp))
+			ai.Logger.Error("JiraTasksProject: delete project jira failed:", err, "resp:", resp)
 			return ai.ResponseFailed(fmt.Sprintf("You execute tool delete_project in jira and its failed! Param: %+v | Result: %+v", tc.Function.Arguments, r), resp)
 		}
-		resp, err := ai.backAsk(tc.ID, r, q)
+		ai.Logger.Info("Respose from delete_project", r)
+		resp, err := ai.backAsk(tc.ID, r, q, msgChoice)
 		if err != nil {
 			return mod.ResponseBody{}, err
 		}
@@ -97,25 +102,25 @@ func (ai *Ai) JiraTasksProject(q mod.Message, resp mod.ResponseBody) (mod.Respon
 	return ai.ResponseFailed(fmt.Sprintf("You execute unknown tool function in jira: %s", tc.Function.Name), resp)
 }
 
-func (ai *Ai) backAsk(id, content string, q mod.Message) (mod.ResponseBody, error) {
-	msg := mod.Message{
+func (ai *Ai) backAsk(id, content string, q mod.Message, assistantToolCallMsg mod.Message) (mod.ResponseBody, error) {
+	toolMsg := mod.Message{
 		Role:       "tool",
 		ToolCallID: id,
 		Content:    content,
 	}
-	m := ai.makeMessage(ai.Config.PromtSystemChat)
-	m = append(m, msg)
-	resp, err := ai.Ask(m, GetToolRouter())
+	messages := ai.Memory.HistoryMessage(q, ai.Config.PromtSystemChat)
+	messages = append(messages, assistantToolCallMsg, toolMsg)
+	resp, err := llmcalls.Ask(ai.makeBody(messages, GetToolRouter()), ai.Config)
 	if err != nil {
-		ai.Logger.Error(fmt.Sprintf("backAsk failed: %v", err))
+		ai.Logger.Error("backAsk failed:", err)
 		return mod.ResponseBody{}, err
 	}
 	msgChoice, err := firstChoice(resp)
 	if err != nil {
-		ai.Logger.Error(err.Error())
+		ai.Logger.Error("backAsk: firstChoice failed:", err)
 		return mod.ResponseBody{}, err
 	}
-	ai.Memory.History = append(ai.Memory.History, Question{Q: q.Content, A: msgChoice.Content, ContextToken: resp.Usage.TotalTokens})
+	ai.Memory.FillShortMemory(q.Content, msgChoice.Content)
 	return resp, nil
 }
 
@@ -125,18 +130,16 @@ func (ai *Ai) ResponseFailed(content string, resp mod.ResponseBody) (mod.Respons
 		Role:    "user",
 		Content: failedstring,
 	}
-	m := ai.makeMessage(ai.Config.PromtSystemChat)
-	m = append(m, msg)
-	resp, err := ai.Ask(m, GetToolRouter())
+	resp, err := llmcalls.Ask(ai.makeBody(ai.Memory.HistoryMessage(msg, ai.Config.PromtSystemChat), nil), ai.Config)
 	if err != nil {
-		ai.Logger.Error(fmt.Sprintf("backAsk failed: %v", err))
+		ai.Logger.Error("ResponseFailed ask failed:", err)
 		return mod.ResponseBody{}, err
 	}
 	msgChoice, err := firstChoice(resp)
 	if err != nil {
-		ai.Logger.Error(err.Error())
+		ai.Logger.Error("ResponseFailed: firstChoice failed:", err)
 		return mod.ResponseBody{}, err
 	}
-	ai.Memory.History = append(ai.Memory.History, Question{Q: failedstring, A: msgChoice.Content, ContextToken: resp.Usage.TotalTokens})
+	ai.Memory.FillShortMemory(failedstring, msgChoice.Content)
 	return resp, nil
 }
