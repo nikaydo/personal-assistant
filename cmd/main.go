@@ -42,5 +42,4 @@ func main() {
 		systemLog.Error("Server start failed:", err)
 		return
 	}
-
 }

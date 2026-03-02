@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/nikaydo/personal-assistant/internal/ai/memory"
@@ -78,7 +77,7 @@ func (ai *Ai) isTool(resp mod.ResponseBody, q mod.Message) (mod.ResponseBody, er
 	}
 
 	f := mod.ToolFunctionParseResponse{Name: tc.Function.Name}
-	if err := json.Unmarshal([]byte(tc.Function.Arguments), &f); err != nil {
+	if err := parseToolArguments(tc.Function.Arguments, &f); err != nil {
 		ai.Logger.Error("isTool: tool args parse failed for", tc.Function.Name, ":", err)
 		return mod.ResponseBody{}, err
 	}

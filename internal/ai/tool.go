@@ -213,5 +213,173 @@ func GetToolsJira(conf ToolConf) []models.Tool {
 				},
 			},
 		},
+		{
+			Type: "function",
+			Function: models.Function{
+				Name:        "issueOne",
+				Description: "Build a complete Jira issue payload for models.IssueSchemeV2. Always fill fields.summary, fields.project, and fields.issuetype. Put Jira custom fields into customFields using keys like customfield_10010.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"issue": map[string]any{
+							"type":        "object",
+							"description": "Payload mapped to models.IssueSchemeV2.",
+							"properties": map[string]any{
+								"fields": map[string]any{
+									"type":        "object",
+									"description": "Issue fields from models.IssueFieldsSchemeV2.",
+									"properties": map[string]any{
+										"summary": map[string]any{
+											"type":        "string",
+											"description": "Short issue title.",
+										},
+										"description": map[string]any{
+											"type":        "string",
+											"description": "Detailed issue description.",
+										},
+										"project": map[string]any{
+											"type":        "object",
+											"description": "Target Jira project. Prefer key, optionally id.",
+											"properties": map[string]any{
+												"key": map[string]any{
+													"type":        "string",
+													"description": "Project key, for example ENG.",
+												},
+												"id": map[string]any{
+													"type":        "string",
+													"description": "Project ID as string.",
+												},
+											},
+											"required": []string{"key"},
+										},
+										"issuetype": map[string]any{
+											"type":        "object",
+											"description": "Jira issue type. Prefer id, optionally name.",
+											"properties": map[string]any{
+												"id": map[string]any{
+													"type":        "string",
+													"description": "Issue type ID.",
+												},
+												"name": map[string]any{
+													"type":        "string",
+													"description": "Issue type name, for example Task or Bug.",
+												},
+											},
+										},
+										"priority": map[string]any{
+											"type":        "object",
+											"description": "Issue priority.",
+											"properties": map[string]any{
+												"id": map[string]any{
+													"type": "string",
+												},
+												"name": map[string]any{
+													"type": "string",
+												},
+											},
+										},
+										"assignee": map[string]any{
+											"type":        "object",
+											"description": "Assignee user.",
+											"properties": map[string]any{
+												"accountId": map[string]any{
+													"type": "string",
+												},
+											},
+										},
+										"reporter": map[string]any{
+											"type":        "object",
+											"description": "Reporter user.",
+											"properties": map[string]any{
+												"accountId": map[string]any{
+													"type": "string",
+												},
+											},
+										},
+										"labels": map[string]any{
+											"type": "array",
+											"items": map[string]any{
+												"type": "string",
+											},
+										},
+										"duedate": map[string]any{
+											"type":        "string",
+											"description": "Due date in format YYYY-MM-DD.",
+										},
+										"parent": map[string]any{
+											"type":        "object",
+											"description": "Parent issue for subtasks.",
+											"properties": map[string]any{
+												"key": map[string]any{
+													"type": "string",
+												},
+												"id": map[string]any{
+													"type": "string",
+												},
+											},
+										},
+										"components": map[string]any{
+											"type": "array",
+											"items": map[string]any{
+												"type": "object",
+												"properties": map[string]any{
+													"id": map[string]any{
+														"type": "string",
+													},
+													"name": map[string]any{
+														"type": "string",
+													},
+												},
+											},
+										},
+										"versions": map[string]any{
+											"type": "array",
+											"items": map[string]any{
+												"type": "object",
+												"properties": map[string]any{
+													"id": map[string]any{
+														"type": "string",
+													},
+													"name": map[string]any{
+														"type": "string",
+													},
+												},
+											},
+										},
+										"fixVersions": map[string]any{
+											"type": "array",
+											"items": map[string]any{
+												"type": "object",
+												"properties": map[string]any{
+													"id": map[string]any{
+														"type": "string",
+													},
+													"name": map[string]any{
+														"type": "string",
+													},
+												},
+											},
+										},
+									},
+									"required": []string{"summary", "project", "issuetype"},
+								},
+							},
+							"required": []string{"fields"},
+						},
+						"customFields": map[string]any{
+							"type":        "object",
+							"description": "Custom Jira fields map. Key format: customfield_<id>. Value can be string, number, boolean, object, array, or null depending on Jira field type.",
+							"patternProperties": map[string]any{
+								"^customfield_[0-9]+$": map[string]any{
+									"type": []string{"string", "number", "boolean", "object", "array", "null"},
+								},
+							},
+							"additionalProperties": true,
+						},
+					},
+					"required": []string{"issue"},
+				},
+			},
+		},
 	}
 }

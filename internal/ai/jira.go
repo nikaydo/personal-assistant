@@ -12,6 +12,7 @@ var PojectFunc []string = []string{
 	"create_project",
 	"search_projects",
 	"delete_project",
+	"issueOne",
 }
 
 func (ai *Ai) JiraTasks(q mod.Message) (mod.ResponseBody, error) {
@@ -91,6 +92,19 @@ func (ai *Ai) JiraTasksProject(q mod.Message, resp mod.ResponseBody) (mod.Respon
 			return ai.ResponseFailed(fmt.Sprintf("You execute tool delete_project in jira and its failed! Param: %+v | Result: %+v", tc.Function.Arguments, r), resp)
 		}
 		ai.Logger.Info("Respose from delete_project", r)
+		resp, err := ai.backAsk(tc.ID, r, q, msgChoice)
+		if err != nil {
+			return mod.ResponseBody{}, err
+		}
+		ai.Logger.Task("backAsk", resp)
+		return resp, nil
+	case "issueOne":
+		r, err := ai.createIssueOneJira(resp)
+		if err != nil {
+			ai.Logger.Error("JiraTasksProject: create issue jira failed:", err, "resp:", resp)
+			return ai.ResponseFailed(fmt.Sprintf("You execute tool issueOne in jira and its failed! Param: %+v | Result: %+v", tc.Function.Arguments, r), resp)
+		}
+		ai.Logger.Info("Respose from issueOne", r)
 		resp, err := ai.backAsk(tc.ID, r, q, msgChoice)
 		if err != nil {
 			return mod.ResponseBody{}, err

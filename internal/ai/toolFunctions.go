@@ -17,14 +17,12 @@ func (ai *Ai) createProjectJira(resp mod.ResponseBody) (string, error) {
 		return "", err
 	}
 	var pj *models.ProjectPayloadScheme
-	if err := json.Unmarshal([]byte(tc.Function.Arguments), &pj); err != nil {
+	if err := parseToolArguments(tc.Function.Arguments, &pj); err != nil {
 		return "", err
 	}
 	ai.Logger.Info(
 		"createProjectJira: executing",
-		"key", pj.Key,
-		"name", pj.Name,
-		"template", pj.ProjectTemplateKey,
+		pj,
 	)
 	projectScheme, responseScheme, err := ai.Jira.CreateProject(pj)
 	if err != nil {
@@ -132,7 +130,7 @@ func (ai *Ai) searchProjectJira(resp mod.ResponseBody) (string, error) {
 		return "", err
 	}
 	var pj mod.ProjectSearchOptions
-	if err := json.Unmarshal([]byte(tc.Function.Arguments), &pj); err != nil {
+	if err := parseToolArguments(tc.Function.Arguments, &pj); err != nil {
 		return "", err
 	}
 	ai.Logger.Info(
@@ -172,7 +170,7 @@ func (ai *Ai) deleteProjectJira(resp mod.ResponseBody) (string, error) {
 	var pj struct {
 		ProjectKeyOrID string `json:"projectKeyOrID"`
 	}
-	if err := json.Unmarshal([]byte(tc.Function.Arguments), &pj); err != nil {
+	if err := parseToolArguments(tc.Function.Arguments, &pj); err != nil {
 		return "", err
 	}
 	ai.Logger.Info("deleteProjectJira: executing", "project_key_or_id", pj.ProjectKeyOrID)
@@ -184,4 +182,55 @@ func (ai *Ai) deleteProjectJira(resp mod.ResponseBody) (string, error) {
 	ai.Logger.Info("deleteProjectJira: success", "status", responseStatusCode(responseScheme))
 
 	return fmt.Sprintf("function return: %+v", responseScheme), nil
+}
+
+func (ai *Ai) createIssueOneJira(resp mod.ResponseBody) (string, error) {
+	tc, err := firstToolCall(resp)
+	if err != nil {
+		return "", err
+	}
+
+	var pj struct {
+		Issue        *models.IssueSchemeV2 `json:"issue"`
+		CustomFields map[string]any        `json:"customFields,omitempty"`
+	}
+	if err := parseToolArguments(tc.Function.Arguments, &pj); err != nil {
+		return "", err
+	}
+	if pj.Issue == nil || pj.Issue.Fields == nil {
+		return "", fmt.Errorf("invalid issue payload: issue.fields is required")
+	}
+
+	ai.Logger.Info(
+		"createIssueOneJira: executing",
+		"summary", pj.Issue.Fields.Summary,
+		"project_key", func() string {
+			if pj.Issue.Fields.Project == nil {
+				return ""
+			}
+			return pj.Issue.Fields.Project.Key
+		}(),
+		"issue_type_id", func() string {
+			if pj.Issue.Fields.IssueType == nil {
+				return ""
+			}
+			return pj.Issue.Fields.IssueType.ID
+		}(),
+		"custom_fields_count", len(pj.CustomFields),
+	)
+
+	issueScheme, responseScheme, err := ai.Jira.CreateIssueOne(pj.Issue, pj.CustomFields)
+	if err != nil {
+		ai.Logger.Error(
+			"createIssueOneJira: jira create issue failed:",
+			err,
+			"status", responseStatusCode(responseScheme),
+			"jira_error", jiraErrorMessage(responseScheme),
+			"response", fmt.Sprintf("%+v", responseScheme),
+		)
+		return "", err
+	}
+
+	ai.Logger.Info("createIssueOneJira: success", "issue_key", issueScheme.Key, "issue_id", issueScheme.ID)
+	return fmt.Sprintf("function return: %+v. with result data: %+v", issueScheme, responseScheme), nil
 }
