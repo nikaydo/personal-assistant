@@ -40,6 +40,9 @@ type Config struct {
 	PromtSystemChat        string `json:"promt_system_chat"`
 	PromtMemorySummary     string `json:"promt_memory_summary"`
 	MemorySummaryUserPromt string `json:"memory_summary_user_promt"`
+
+	SpotifyRefresh string `json:"spotify_refresh"`
+	SpotifyAccess  string `json:"spotify_access"`
 }
 
 func ConfigRead(path string) (*Config, error) {

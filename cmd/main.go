@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 
-	_ "github.com/ctreminiom/go-atlassian/v2/jira/v3"
 	"github.com/nikaydo/personal-assistant/internal/api"
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/logg"

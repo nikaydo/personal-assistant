@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/nikaydo/personal-assistant/internal/ai"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
@@ -30,7 +29,7 @@ func (api *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	api.Ai.Logger.Info("chat request accepted", "message_len", len(Query.Message), "type", Query.Type)
 
-	msg, err := api.Ai.MakeAsk(models.Message{Role: "user", Content: Query.Message}, ai.GetToolRouter())
+	msg, err := api.Ai.MakeAsk(models.Message{Role: "user", Content: Query.Message}, []models.Tool{})
 	if err != nil {
 		api.Ai.Logger.Error("chat processing failed:", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)

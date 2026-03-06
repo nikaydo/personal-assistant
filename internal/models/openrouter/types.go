@@ -12,8 +12,8 @@ type RequestBody struct {
 	Model                 string                `json:"model"`
 	Models                []string              `json:"models,omitempty"`
 	Messages              []chatmodels.Message  `json:"messages"`
-	Provider              Provider              `json:"provider,omitempty"`
-	PreferedMinThroughput PreferedMinThroughput `json:"prefered_min_throughput,omitempty"`
+	Provider              Provider              `json:"provider"`
+	PreferedMinThroughput PreferedMinThroughput `json:"prefered_min_throughput"`
 	Tools                 []toolmodels.Tool     `json:"tools,omitempty"`
 	Input                 string                `json:"input,omitempty"`
 	ToolsChoise           any                   `json:"tool_choice,omitempty"`
@@ -21,7 +21,7 @@ type RequestBody struct {
 
 type ToolsChoise struct {
 	Type     string             `json:"type"`
-	Function ToolsChoisePayload `json:"function,omitempty"`
+	Function ToolsChoisePayload `json:"function"`
 }
 
 type ToolsChoisePayload struct {

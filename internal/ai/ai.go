@@ -8,7 +8,6 @@ import (
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
 	"github.com/nikaydo/personal-assistant/internal/logg"
 	"github.com/nikaydo/personal-assistant/internal/models"
-	"github.com/nikaydo/personal-assistant/internal/services"
 )
 
 type Memory = memory.Memory
@@ -22,10 +21,6 @@ type Ai struct {
 	Memory *memory.Memory
 
 	Config config.Config
-
-	Jira *services.JiraService
-
-	ToolConf *ToolConf
 
 	Logger *logg.Logger
 }

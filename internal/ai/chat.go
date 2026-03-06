@@ -82,15 +82,8 @@ func (ai *Ai) isTool(resp mod.ResponseBody, q mod.Message) (mod.ResponseBody, er
 		return mod.ResponseBody{}, err
 	}
 	switch f.Name {
-	case "select_tool_group":
-		switch f.Group {
-		case "jira":
-			resp, err := ai.JiraTasks(q)
-			if err != nil {
-				return mod.ResponseBody{}, err
-			}
-			return resp, nil
-		}
+	case "":
+
 	}
 
 	msgChoice, err := firstChoice(resp)
