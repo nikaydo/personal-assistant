@@ -6,11 +6,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/logg"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
+
+var httpClient = &http.Client{
+	Timeout: 30 * time.Second,
+}
 
 func Ask(body models.RequestBody, cfg config.Config) (models.ResponseBody, error) {
 	jsonBody, err := json.Marshal(body)
@@ -59,8 +64,7 @@ func doReq(buf []byte, url, token, method string) ([]byte, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("HTTP-Referer", "http://localhost")
 	req.Header.Set("X-Title", "narria")
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

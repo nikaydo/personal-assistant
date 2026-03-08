@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	toolsmemory "github.com/nikaydo/personal-assistant/internal/ai/tools"
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/database"
+	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
 	"github.com/nikaydo/personal-assistant/internal/logg"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
@@ -119,6 +121,7 @@ func TestLongTermMemoryFill_SkipWhenQuestionEmpty(t *testing.T) {
 func TestMessageWithHistory_LongTermBlockInjectedInOrder(t *testing.T) {
 	m := newTestMemory()
 	m.Tokens.LongTermLimit = 10_000
+	m.Tokens.ShortTermLimit = 10_000
 	m.DBase = &database.Database{}
 	m.ShortTerm = []History{
 		{
@@ -165,7 +168,7 @@ func TestMessageWithHistory_LongTermBlockInjectedInOrder(t *testing.T) {
 
 func TestBuildLongTermBlock_RespectsTokenBudget(t *testing.T) {
 	m := newTestMemory()
-	header := mem + "\n"
+	header := "Long-term conversation memory:\n"
 	firstLine := "1. one\n"
 	m.Tokens.LongTermLimit = len(header) + len(firstLine)
 
@@ -234,4 +237,123 @@ func TestMessageWithHistory_LongTermSoftFallbackOnErrors(t *testing.T) {
 			t.Fatalf("unexpected fallback message: %#v", msg[0])
 		}
 	})
+}
+
+func TestSummaryShortMemory_TriggersWhenMessageCountAboveThreshold(t *testing.T) {
+	m := newTestMemory()
+	m.Cfg.ShortMemoryMessagesCount = 2
+	m.Cfg.SummaryMemoryStep = 1
+	m.Tokens.MessageCount = 4
+	m.ShortTerm = []History{
+		{Question: ShotTermQuestion{Text: "q1"}, Answer: ShotTermAnswer{Text: "a1"}},
+		{Question: ShotTermQuestion{Text: "q2"}, Answer: ShotTermAnswer{Text: "a2"}},
+	}
+
+	oldEnqueue := enqueueSummaryFn
+	oldDetect := detectChosenToolFn
+	t.Cleanup(func() {
+		enqueueSummaryFn = oldEnqueue
+		detectChosenToolFn = oldDetect
+	})
+
+	enqueueCalled := false
+	enqueueSummaryFn = func(_ *llmcalls.Queue, _ llmcalls.QueueItem) (models.ResponseBody, error) {
+		enqueueCalled = true
+		return models.ResponseBody{}, nil
+	}
+	detectChosenToolFn = func(_ *toolsmemory.Tool, _ models.ResponseBody) error {
+		return nil
+	}
+
+	if err := m.SummaryShortMemory(nil, "test-model"); err != nil {
+		t.Fatalf("SummaryShortMemory returned error: %v", err)
+	}
+	if !enqueueCalled {
+		t.Fatalf("expected summarization queue call when message count is above threshold")
+	}
+	if m.Tokens.MessageCount != m.Cfg.ShortMemoryMessagesCount {
+		t.Fatalf("unexpected message count after summarization: got=%d want=%d", m.Tokens.MessageCount, m.Cfg.ShortMemoryMessagesCount)
+	}
+}
+
+func TestSummaryShortMemory_UsesConfigPrompt(t *testing.T) {
+	m := newTestMemory()
+	m.Cfg.ShortMemoryMessagesCount = 1
+	m.Cfg.SummaryMemoryStep = 1
+	m.Cfg.PromtMemorySummary = "prompt from config"
+	m.Tokens.MessageCount = 2
+	m.ShortTerm = []History{
+		{Question: ShotTermQuestion{Text: "q1"}, Answer: ShotTermAnswer{Text: "a1"}},
+	}
+
+	oldEnqueue := enqueueSummaryFn
+	oldDetect := detectChosenToolFn
+	t.Cleanup(func() {
+		enqueueSummaryFn = oldEnqueue
+		detectChosenToolFn = oldDetect
+	})
+
+	var gotPrompt string
+	enqueueSummaryFn = func(_ *llmcalls.Queue, item llmcalls.QueueItem) (models.ResponseBody, error) {
+		if len(item.Body.Messages) > 0 {
+			gotPrompt = item.Body.Messages[0].Content
+		}
+		return models.ResponseBody{}, nil
+	}
+	detectChosenToolFn = func(_ *toolsmemory.Tool, _ models.ResponseBody) error {
+		return nil
+	}
+
+	if err := m.SummaryShortMemory(nil, "test-model"); err != nil {
+		t.Fatalf("SummaryShortMemory returned error: %v", err)
+	}
+	if gotPrompt != m.Cfg.PromtMemorySummary {
+		t.Fatalf("unexpected summary prompt: got=%q want=%q", gotPrompt, m.Cfg.PromtMemorySummary)
+	}
+}
+
+func TestContextCoeffCalc_UsesConfiguredWindowAndSkipsZeroTokens(t *testing.T) {
+	ct := ContextTokens{
+		ContextCoeff:      []float32{1},
+		ContextCoeffCount: 2,
+	}
+
+	ct.ContextCoeffCalc(10, models.ResponseBody{Usage: models.Usage{TotalTokens: 2}})
+	ct.ContextCoeffCalc(20, models.ResponseBody{Usage: models.Usage{TotalTokens: 4}})
+	ct.ContextCoeffCalc(999, models.ResponseBody{Usage: models.Usage{TotalTokens: 0}})
+
+	coeffs := ct.ContextCoeffSnapshot()
+	if len(coeffs) != 2 {
+		t.Fatalf("unexpected coeff window size: got=%d want=2", len(coeffs))
+	}
+	if coeffs[0] != 5 || coeffs[1] != 5 {
+		t.Fatalf("unexpected coeffs: got=%v want=[5 5]", coeffs)
+	}
+}
+
+func TestShortMemoryFill_RespectsTokenLimit(t *testing.T) {
+	m := newTestMemory()
+	m.Tokens.ContextCoeff = []float32{1}
+	m.Tokens.ShortTermLimit = 6
+	m.ShortTerm = []History{
+		{Question: ShotTermQuestion{Text: "a"}, Answer: ShotTermAnswer{Text: "b"}},
+		{Question: ShotTermQuestion{Text: "cc"}, Answer: ShotTermAnswer{Text: "dd"}},
+		{Question: ShotTermQuestion{Text: "eee"}, Answer: ShotTermAnswer{Text: "fff"}},
+	}
+
+	shortTokens := 0
+	msg := m.ShortMemoryFill(nil, &shortTokens)
+
+	if len(msg) != 2 {
+		t.Fatalf("unexpected messages count: got=%d want=2", len(msg))
+	}
+	if msg[0].Role != "user" || msg[0].Content != "eee" {
+		t.Fatalf("unexpected user message: %#v", msg[0])
+	}
+	if msg[1].Role != "assistant" || msg[1].Content != "fff" {
+		t.Fatalf("unexpected assistant message: %#v", msg[1])
+	}
+	if shortTokens != 6 {
+		t.Fatalf("unexpected short-term tokens: got=%d want=6", shortTokens)
+	}
 }

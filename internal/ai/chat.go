@@ -7,6 +7,10 @@ import (
 	mod "github.com/nikaydo/personal-assistant/internal/models"
 )
 
+var addToQueueFn = func(q *llmcalls.Queue, item llmcalls.QueueItem) (mod.ResponseBody, error) {
+	return q.AddToQueue(item)
+}
+
 func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 	ai.Logger.Question(q)
 	history := ai.Memory.MessageWithHistory(q, ai.Config.PromtSystemChat)
@@ -15,7 +19,7 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 		"history_messages", len(history),
 		"tools_count", len(tools),
 	)
-	respLLM, err := ai.Queue.AddToQueue(llmcalls.QueueItem{Body: ai.makeBody(history, tools)})
+	respLLM, err := addToQueueFn(ai.Queue, llmcalls.QueueItem{Body: ai.makeBody(history, tools)})
 	if err != nil {
 		ai.Logger.Error("MakeAsk: ask request failed:", err)
 		return mod.ResponseBody{}, err
@@ -32,8 +36,9 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 	}
 
 	if len(msgChoice.ToolCalls) > 0 {
-
-		return mod.ResponseBody{}, nil
+		err := fmt.Errorf("%w: model returned %d tool call(s)", ErrToolCallsNotImplemented, len(msgChoice.ToolCalls))
+		ai.Logger.Warn("MakeAsk: tool calls are not implemented", "tool_calls", len(msgChoice.ToolCalls))
+		return mod.ResponseBody{}, err
 	}
 
 	if msgChoice.Content == "" {

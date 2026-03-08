@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"sync"
+
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
@@ -17,8 +19,11 @@ type ContextTokens struct {
 
 	MessageCount int
 
+	ContextCoeffCount     int
 	ContextCoeff          []float32
 	CountSymbolsInContext int
+
+	mu sync.RWMutex
 }
 
 func (ct *ContextTokens) CalculateContextLimit(cfg config.Config) {
@@ -31,6 +36,9 @@ func (ct *ContextTokens) CalculateContextLimit(cfg config.Config) {
 }
 
 func (ct *ContextTokens) GetContextCoeff() float32 {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+
 	var count int
 	var totalCoeff float32
 	for _, coeff := range ct.ContextCoeff {
@@ -44,9 +52,30 @@ func (ct *ContextTokens) GetContextCoeff() float32 {
 	return totalCoeff / float32(count)
 }
 
-func (ct *ContextTokens) ContextCoeffCalc(q string, body models.ResponseBody) {
-	if len(ct.ContextCoeff) >= ct.ContextLimit {
-		ct.ContextCoeff = ct.ContextCoeff[1:]
+func (ct *ContextTokens) ContextCoeffSnapshot() []float32 {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+
+	out := make([]float32, len(ct.ContextCoeff))
+	copy(out, ct.ContextCoeff)
+	return out
+}
+
+func (ct *ContextTokens) ContextCoeffCalc(symbolsInContext int, body models.ResponseBody) {
+	if body.Usage.TotalTokens <= 0 || symbolsInContext <= 0 {
+		return
 	}
-	ct.ContextCoeff = append(ct.ContextCoeff, float32(ct.CountSymbolsInContext)/float32(body.Usage.TotalTokens))
+
+	window := ct.ContextCoeffCount
+	if window <= 0 {
+		window = 12
+	}
+
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
+
+	ct.ContextCoeff = append(ct.ContextCoeff, float32(symbolsInContext)/float32(body.Usage.TotalTokens))
+	if len(ct.ContextCoeff) > window {
+		ct.ContextCoeff = ct.ContextCoeff[len(ct.ContextCoeff)-window:]
+	}
 }

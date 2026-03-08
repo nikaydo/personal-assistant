@@ -3,6 +3,7 @@ package llmcalls
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -10,6 +11,10 @@ import (
 	"github.com/nikaydo/personal-assistant/internal/logg"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
+
+var askFn = Ask
+
+var ErrQueueStopped = errors.New("queue is stopped")
 
 type Queue struct {
 	cfg config.Config
@@ -20,6 +25,7 @@ type Queue struct {
 	started atomic.Bool
 	nextID  atomic.Int64
 	cancel  context.CancelFunc
+	ctx     context.Context
 	stopWg  sync.WaitGroup
 	stopMu  sync.Mutex
 }
@@ -72,6 +78,7 @@ func (q *Queue) QueueStartWithContext(ctx context.Context) {
 	workerCtx, cancel := context.WithCancel(ctx)
 	q.stopMu.Lock()
 	q.cancel = cancel
+	q.ctx = workerCtx
 	q.stopMu.Unlock()
 	q.info("Queue worker started", "buffer_capacity", cap(q.jobs))
 
@@ -92,11 +99,15 @@ func (q *Queue) Stop() {
 	q.info("Queue stop requested")
 	q.stopMu.Lock()
 	cancel := q.cancel
+	q.cancel = nil
 	q.stopMu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	q.stopWg.Wait()
+	q.stopMu.Lock()
+	q.ctx = nil
+	q.stopMu.Unlock()
 	q.started.Store(false)
 }
 
@@ -104,12 +115,21 @@ func (q *Queue) AddToQueue(item QueueItem) (models.ResponseBody, error) {
 	if !q.started.Load() {
 		return models.ResponseBody{}, errors.New("queue is not started")
 	}
+	ctx := q.getContext()
+	if ctx == nil {
+		return models.ResponseBody{}, ErrQueueStopped
+	}
+
 	item.ID = int(q.nextID.Add(1))
 	job := queueJob{
 		item:     item,
 		resultCh: make(chan models.ResponseBody, 1),
 	}
-	q.jobs <- job
+	select {
+	case q.jobs <- job:
+	case <-ctx.Done():
+		return models.ResponseBody{}, fmt.Errorf("%w: %v", ErrQueueStopped, ctx.Err())
+	}
 	q.debug(
 		"Queue item enqueued",
 		"item_id", item.ID,
@@ -117,7 +137,12 @@ func (q *Queue) AddToQueue(item QueueItem) (models.ResponseBody, error) {
 		"messages_count", len(item.Body.Messages),
 		"model", item.Body.Model,
 	)
-	resp := <-job.resultCh
+	var resp models.ResponseBody
+	select {
+	case resp = <-job.resultCh:
+	case <-ctx.Done():
+		return models.ResponseBody{}, fmt.Errorf("%w: %v", ErrQueueStopped, ctx.Err())
+	}
 	if resp.Error.Message != "" {
 		q.error("Queue item failed", "item_id", item.ID, "error", resp.Error.Message)
 	} else {
@@ -126,13 +151,26 @@ func (q *Queue) AddToQueue(item QueueItem) (models.ResponseBody, error) {
 	return resp, nil
 }
 
-func (q *Queue) process(job queueJob, _ context.Context) {
+func (q *Queue) process(job queueJob, ctx context.Context) {
 	q.debug("Queue processing started", "item_id", job.item.ID)
-	resp, err := Ask(job.item.Body, q.cfg)
+	select {
+	case <-ctx.Done():
+		job.resultCh <- models.ResponseBody{Error: models.Error{Message: ErrQueueStopped.Error()}}
+		return
+	default:
+	}
+
+	resp, err := askFn(job.item.Body, q.cfg)
 	if err != nil {
 		resp = models.ResponseBody{Error: models.Error{Message: err.Error()}}
 	}
 	job.resultCh <- resp
+}
+
+func (q *Queue) getContext() context.Context {
+	q.stopMu.Lock()
+	defer q.stopMu.Unlock()
+	return q.ctx
 }
 
 func (q *Queue) debug(msg ...any) {

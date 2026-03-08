@@ -30,7 +30,10 @@ func main() {
 	apiLog.Info(fmt.Sprintf("Server configured on addr %s:%d", config.ApiHost, config.ApiPort))
 
 	aiLog.Info("Loading model metadata")
-	api.Ai.GetModelData()
+	if err := api.Ai.GetModelData(); err != nil {
+		aiLog.Error("Failed to load model metadata:", err)
+		return
+	}
 	aiLog.Info(fmt.Sprintf("Context length: %d", api.Ai.Memory.Tokens.ContextLimit))
 
 	api.Ai.Memory.Tokens.CalculateContextLimit(api.Ai.Config)

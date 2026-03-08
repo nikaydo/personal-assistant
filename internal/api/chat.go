@@ -2,11 +2,17 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
+	aimodel "github.com/nikaydo/personal-assistant/internal/ai"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
+
+var makeAskFn = func(ai *aimodel.Ai, q string, tools []models.Tool) (models.ResponseBody, error) {
+	return ai.MakeAsk(q, tools)
+}
 
 func (api *API) chat(w http.ResponseWriter, r *http.Request) {
 	var Query models.Query
@@ -23,10 +29,14 @@ func (api *API) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.Ai.Logger.Info("chat request accepted", "message_len", len(Query.Message), "type", Query.Type)
-	msg, err := api.Ai.MakeAsk(Query.Message, []models.Tool{})
+	msg, err := makeAskFn(api.Ai, Query.Message, []models.Tool{})
 	if err != nil {
 		api.Ai.Logger.Error("chat processing failed:", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		status := http.StatusInternalServerError
+		if errors.Is(err, aimodel.ErrToolCallsNotImplemented) {
+			status = http.StatusNotImplemented
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

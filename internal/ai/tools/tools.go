@@ -17,6 +17,8 @@ type Tool struct {
 	Cfg   config.Config
 }
 
+var createEmbeddingFn = llmcalls.CreateEmbending
+
 func GetName(body models.ResponseBody) (string, error) {
 	if len(body.Choices) == 0 {
 		return "", errors.New("body not have Choices")
@@ -48,9 +50,15 @@ func (t *Tool) DetectChosenTool(body models.ResponseBody) error {
 		if err := GetArgs(body, &args); err != nil {
 			return err
 		}
-		emb, err := llmcalls.CreateEmbending(args.Text, t.Cfg)
+		emb, err := createEmbeddingFn(args.Text, t.Cfg)
 		if err != nil {
 			return err
+		}
+		if len(emb.Data) == 0 || len(emb.Data[0].Embedding) == 0 {
+			return errors.New("empty embedding response")
+		}
+		if t.Dbase == nil {
+			return errors.New("database is nil")
 		}
 		if _, err := t.Dbase.SaveSummary(uuid.New().String(), emb.Data[0].Embedding, args); err != nil {
 			return err

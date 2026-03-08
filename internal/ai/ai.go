@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"fmt"
 	"slices"
 
 	"github.com/nikaydo/personal-assistant/internal/ai/memory"
@@ -11,6 +12,8 @@ import (
 	"github.com/nikaydo/personal-assistant/internal/logg"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
+
+var getModelDataFn = llmcalls.GetModelData
 
 type Ai struct {
 	Model     []string
@@ -41,7 +44,8 @@ func Init(config config.Config, aiLog *logg.Logger, db *database.Database) *Ai {
 			Logger: aiLog,
 			Tools:  tools,
 			Tokens: memory.ContextTokens{
-				ContextCoeff: []float32{config.ContextCoeff},
+				ContextCoeff:      []float32{config.ContextCoeff},
+				ContextCoeffCount: config.ContextCoeffCount,
 			},
 		},
 		Config: config,
@@ -64,21 +68,29 @@ func (ai *Ai) makeBody(messages []models.Message, tools []models.Tool) models.Re
 	return body
 }
 
-func (ai *Ai) GetModelData() {
-	Model, err := llmcalls.GetModelData(ai.Config, ai.Logger)
+func (ai *Ai) GetModelData() error {
+	Model, err := getModelDataFn(ai.Config, ai.Logger)
 	if err != nil {
 		ai.Logger.Error("GetModelData failed", "error", err)
-		return
+		return err
 	}
 
+	ai.Model = ai.Model[:0]
+	ai.ModelData = ai.ModelData[:0]
+	minAvailableContext := 0
 	for _, v := range Model.Data {
 		for _, i := range ai.Config.ModelOpenRouter {
 			if v.Id == i {
 				ai.Logger.Info("Model found", "model", v.Id)
 				ai.Model = append(ai.Model, v.Id)
 				ai.ModelData = append(ai.ModelData, v)
-				if v.ContextLength-ai.Config.ContextSavedForResponse < ai.Memory.Tokens.ContextLimit || ai.Memory.Tokens.ContextLimit == 0 {
-					ai.Memory.Tokens.ContextLimit = v.ContextLength - ai.Config.ContextSavedForResponse
+				availableContext := v.ContextLength - ai.Config.ContextSavedForResponse
+				if availableContext <= 0 {
+					ai.Logger.Warn("Model has non-positive available context", "model", v.Id, "context_length", v.ContextLength, "reserved_for_response", ai.Config.ContextSavedForResponse)
+					continue
+				}
+				if minAvailableContext == 0 || availableContext < minAvailableContext {
+					minAvailableContext = availableContext
 				}
 			}
 		}
@@ -89,15 +101,26 @@ func (ai *Ai) GetModelData() {
 			ai.Logger.Warn("Model does not support tool or tool_choice", "model", i)
 		}
 	}
-	if ai.Memory.Tokens.ContextLimit -= ai.Config.ContextSavedForResponse; ai.Memory.Tokens.ContextLimit < 0 {
-		ai.Logger.Warn("Context limit is less than zero after adjustment, setting to zero", "context_limit", ai.Memory.Tokens.ContextLimit)
-		ai.Memory.Tokens.ContextLimit = 0
-	} else {
-		ai.Memory.Tokens.ContextLimit -= ai.Config.ContextSavedForResponse
-	}
 
 	if len(ai.ModelData) == 0 {
-		ai.Logger.Error("Models not found. Configure settings.json")
-		return
+		err := fmt.Errorf("models not found: configure settings.json")
+		ai.Logger.Error(err)
+		return err
 	}
+
+	contextLimit := minAvailableContext
+	if ai.Config.ContextLimit > 0 {
+		contextLimit = ai.Config.ContextLimit
+		if minAvailableContext > 0 && contextLimit > minAvailableContext {
+			contextLimit = minAvailableContext
+		}
+	}
+	if contextLimit <= 0 {
+		err := fmt.Errorf("context limit is non-positive after model selection")
+		ai.Logger.Error(err, "context_limit", contextLimit, "min_available_context", minAvailableContext, "configured_context_limit", ai.Config.ContextLimit)
+		return err
+	}
+
+	ai.Memory.Tokens.ContextLimit = contextLimit
+	return nil
 }

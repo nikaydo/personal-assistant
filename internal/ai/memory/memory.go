@@ -13,8 +13,6 @@ import (
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
-var mem string = "Long-term conversation memory:"
-
 const longTermTopK = 20
 
 var createEmbeddingFn = llmcalls.CreateEmbending
@@ -72,12 +70,15 @@ type ShotTermAnswer struct {
 func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmcalls.Queue, model string) {
 	// сохраняем в краткосрочной памяти вопрос и ответ
 	m.FillShortMemory(question, answer)
-	if err := m.SummaryShortMemory(mem, Queue, model); err != nil {
+	if err := m.SummaryShortMemory(Queue, model); err != nil {
 		m.Logger.Error("SummaryShortMemory: failed to summarize short-term memory:", err)
 	}
 	// рассчитываем коэффициент контекста
-	m.Tokens.ContextCoeffCalc(question, answer)
-	m.Logger.Memory("ContextCoeffCalc: calculated context coefficient", "context_coeff", fmt.Sprintf("%v/[%v]", m.Tokens.GetContextCoeff(), m.Tokens.ContextCoeff), "total_tokens", answer.Usage.TotalTokens, "symbols_in_context", m.Tokens.CountSymbolsInContext)
+	m.mu.RLock()
+	symbolsInContext := m.Tokens.CountSymbolsInContext
+	m.mu.RUnlock()
+	m.Tokens.ContextCoeffCalc(symbolsInContext, answer)
+	m.Logger.Memory("ContextCoeffCalc: calculated context coefficient", "context_coeff", fmt.Sprintf("%v/[%v]", m.Tokens.GetContextCoeff(), m.Tokens.ContextCoeffSnapshot()), "total_tokens", answer.Usage.TotalTokens, "symbols_in_context", symbolsInContext)
 }
 
 func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
@@ -115,7 +116,7 @@ func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
 		"question_tokens", questionTokens,
 		"total_context_tokens", *systemPromptTokens+*longTermTokens+*shortTermTokens+questionTokens,
 		"context_limit", m.Tokens.ContextLimit,
-		"context_coeff", m.Tokens.ContextCoeff,
+		"context_coeff", m.Tokens.ContextCoeffSnapshot(),
 	)
 	m.Logger.Info("Memory with history", "messages_count", len(messages))
 	return messages
@@ -217,13 +218,14 @@ func (m *Memory) buildLongTermBlock(summaries []models.SummarizeResponse) (strin
 		coeff = 5
 	}
 
-	header := mem + "\n"
+	header := "Long-term conversation memory:\n"
 	if int(float32(len(header))/coeff) > m.Tokens.LongTermLimit {
 		return "", 0, 0
 	}
 
 	var b strings.Builder
 	b.WriteString(header)
+	currentSymbols := len(header)
 	added := 0
 	for _, summary := range summaries {
 		text := strings.TrimSpace(summary.Text)
@@ -231,12 +233,13 @@ func (m *Memory) buildLongTermBlock(summaries []models.SummarizeResponse) (strin
 			continue
 		}
 		line := fmt.Sprintf("%d. %s\n", added+1, text)
-		candidate := b.String() + line
-		candidateTokens := int(float32(len(candidate)) / coeff)
+		candidateSymbols := currentSymbols + len(line)
+		candidateTokens := int(float32(candidateSymbols) / coeff)
 		if candidateTokens > m.Tokens.LongTermLimit {
 			break
 		}
 		b.WriteString(line)
+		currentSymbols = candidateSymbols
 		added++
 	}
 	if added == 0 {
@@ -249,19 +252,50 @@ func (m *Memory) buildLongTermBlock(summaries []models.SummarizeResponse) (strin
 }
 
 func (m *Memory) ShortMemoryFill(msg []models.Message, ShortTermTokens *int) []models.Message {
-	for i := range m.ShortTerm {
+	if m.Tokens.ShortTermLimit <= 0 {
+		m.Logger.Memory("ShortMemoryFill: short-term memory is disabled, skipping short-term memory in context")
+		return msg
+	}
+	coeff := m.Tokens.GetContextCoeff()
+	if coeff <= 0 {
+		coeff = 5
+	}
+
+	type shortPair struct {
+		user      string
+		assistant string
+		tokens    int
+		symbols   int
+	}
+
+	selected := make([]shortPair, 0, len(m.ShortTerm))
+	totalTokens := 0
+	for i := len(m.ShortTerm) - 1; i >= 0; i-- {
+		symbols := len(m.ShortTerm[i].Question.Text) + len(m.ShortTerm[i].Answer.Text)
+		pairTokens := int(float32(symbols) / coeff)
+		if totalTokens+pairTokens > m.Tokens.ShortTermLimit {
+			break
+		}
+		selected = append(selected, shortPair{
+			user:      m.ShortTerm[i].Question.Text,
+			assistant: m.ShortTerm[i].Answer.Text,
+			tokens:    pairTokens,
+			symbols:   symbols,
+		})
+		totalTokens += pairTokens
+	}
+
+	for i := len(selected) - 1; i >= 0; i-- {
 		msg = append(msg,
 			models.Message{
 				Role:    "user",
-				Content: m.ShortTerm[i].Question.Text,
+				Content: selected[i].user,
 			}, models.Message{
 				Role:    "assistant",
-				Content: m.ShortTerm[i].Answer.Text,
+				Content: selected[i].assistant,
 			})
-
-		symbolsInMsg := len(m.ShortTerm[i].Question.Text) + len(m.ShortTerm[i].Answer.Text)
-		*ShortTermTokens += int(float32(symbolsInMsg) / m.Tokens.GetContextCoeff())
-		m.Tokens.CountSymbolsInContext += symbolsInMsg
+		*ShortTermTokens += selected[i].tokens
+		m.Tokens.CountSymbolsInContext += selected[i].symbols
 	}
 	return msg
 }
