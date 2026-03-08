@@ -6,7 +6,7 @@
 ![Memory](https://img.shields.io/badge/Memory-Short%20%2B%20Long-F59E0B)
 ![Status](https://img.shields.io/badge/Status-Active-22C55E)
 
-> Локальный Go-сервис для чата через OpenRouter с многоуровневой памятью (short-term + long-term) и переключаемым векторным хранилищем.
+> Локальный Go-сервис для чата через OpenRouter с многоуровневой памятью (system-prompt + user-profile + tools-history + short-term + long-term ) и переключаемым векторным хранилищем.
 
 [English version](README.md)
 
@@ -46,7 +46,6 @@
 | `internal/database/localCombinedDB` | Stable | Комбинация HNSW + MySQL |
 | `internal/database/pinecone` | Beta | Работает при конфиге, но покрытие ниже local mode |
 | Tool calls в `/chat` flow | Limited | При `tool_calls` возвращается `501` |
-| AuthN/AuthZ | Missing | Нужно добавить перед production-expose |
 
 Легенда: `Stable` = подходит для регулярного использования, `Beta` = можно использовать с оговорками, `Limited` = намеренно неполная реализация.
 
@@ -189,37 +188,10 @@ go run ./cmd
 
 ---
 
-## Production Checklist
-
-- [ ] Добавить аутентификацию/авторизацию перед API
-- [ ] Ограничить или отключить `/memory` и `/msg` в production
-- [ ] Хранить секреты через env/secret manager, не в `settings.json`
-- [ ] Добавить rate limiting и лимит размера body
-- [ ] Добавить health/readiness endpoint’ы
-- [ ] Настроить централизованный сбор логов и алерты
-- [ ] Добавить интеграционные тесты полного `/chat` pipeline
-- [ ] Определить backup/retention политику для long-term хранилища
-
----
-
-## Эксплуатационные заметки
-
-- HTTP сервер работает с read/write/idle timeout.
-- Graceful shutdown останавливает очередь и закрывает локальные соединения БД.
-- Логика суммаризации не теряет short-term сообщения при ошибке суммаризации.
-
----
-
 ## Безопасность
 
 - `settings.json` хранится в открытом виде.
 - Не коммить реальные ключи и токены.
-- В production обязательно ограничь доступ к `/memory` и `/msg`.
+- Открытая информация в `/memory` и `/msg`.
 
----
-
-## Ограничения
-
-- Нет встроенной HTTP-аутентификации.
-- Short-term память хранится только в процессе.
-- `/memory` и `/msg` ориентированы на диагностику.
+ 

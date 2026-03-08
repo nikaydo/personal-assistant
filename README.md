@@ -6,7 +6,7 @@
 ![Memory](https://img.shields.io/badge/Memory-Short%20%2B%20Long-F59E0B)
 ![Status](https://img.shields.io/badge/Status-Active-22C55E)
 
-> Local Go service for OpenRouter chat with layered memory (short-term + long-term) and pluggable vector storage.
+> Local Go service for OpenRouter chat with layered memory (system-prompt + user-profile + tools-history + short-term + long-term ) and pluggable vector storage.
 
 [Русская версия](README.ru.md)
 
@@ -46,7 +46,6 @@ Result: more stable, context-aware answers with predictable token budgeting.
 | `internal/database/localCombinedDB` | Stable | HNSW + MySQL combined storage |
 | `internal/database/pinecone` | Beta | Works when configured; less test depth than local mode |
 | Tool calls in `/chat` flow | Limited | Returns `501` when model emits `tool_calls` |
-| AuthN/AuthZ | Missing | Must be added for production exposure |
 
 Legend: `Stable` = ready for regular use, `Beta` = usable with caveats, `Limited` = intentionally incomplete.
 
@@ -202,24 +201,9 @@ Status codes:
 
 ---
 
-## Operational Notes
-
-- HTTP server has read/write/idle timeouts configured.
-- Graceful shutdown stops queue workers and closes local DB connections.
-- Summarization commit is protected from dropping short-term messages on failed summarization.
-
----
-
 ## Security Notes
 
 - `settings.json` is plaintext.
 - Do not commit real API keys/tokens.
 - Protect `/memory` and `/msg` in production.
-
----
-
-## Known Limits
-
-- No built-in HTTP auth.
-- Short-term memory is process-local.
-- `/memory` and `/msg` are diagnostics-oriented endpoints.
+ 
