@@ -51,7 +51,10 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 		ai.Logger.Error("MakeAsk:", err)
 		return mod.ResponseBody{}, err
 	}
-	ai.Memory.Memory(q, respLLM)
+	go func() {
+		ai.Memory.Memory(q, respLLM, ai.Queue, ai.Model[0])
+	}()
+
 	ai.Logger.Answer(respLLM)
 	return respLLM, nil
 }

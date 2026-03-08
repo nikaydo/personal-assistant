@@ -17,11 +17,15 @@ type Config struct {
 	ApiUrlOpenrouterEmbeddings string   `json:"api_url_openrouter_embeddings"`
 
 	//config for database
-	DatabaseApiKey string `json:"database_api_key"`
-	IndexName      string `json:"indexName"`
-	Cloud          string `json:"cloud"`
-	Region         string `json:"region"`
-	EmbedModel     string `json:"embedModel"`
+	PinecoreApiKey     string `json:"pinecore_api_key"`
+	PinecoreIndexName  string `json:"pinecore_indexName"`
+	PinecoreCloud      string `json:"pinecore_cloud"`
+	PinecoreRegion     string `json:"pinecore_region"`
+	PinecoreEmbedModel string `json:"pinecore_embedModel"`
+	LocalDBPath        string `json:"local_db_path"`
+	LocalVectorDim     int    `json:"local_vector_dimension"`
+	LocalMySQLDSN      string `json:"local_mysql_dsn"`
+	LocalMySQLTable    string `json:"local_mysql_table"`
 
 	//Config for context
 	ContextLimit             int     `json:"context_limit"`
@@ -70,6 +74,18 @@ func applyEnvOverrides(config *Config) error {
 	config.ModelEmbending = getEnvString("MODEL_EMBENDING_OPENROUTER", config.ModelEmbending)
 	config.ApiUrlOpenrouter = getEnvString("API_URL_OPENROUTER", config.ApiUrlOpenrouter)
 	config.ApiUrlOpenrouterEmbeddings = getEnvString("API_URL_OPENROUTER_EMBEDDINGS", config.ApiUrlOpenrouterEmbeddings)
+	config.PinecoreApiKey = getEnvString("PINECORE_API_KEY", config.PinecoreApiKey)
+	config.PinecoreIndexName = getEnvString("PINECORE_INDEX_NAME", config.PinecoreIndexName)
+	config.PinecoreCloud = getEnvString("PINECORE_CLOUD", config.PinecoreCloud)
+	config.PinecoreRegion = getEnvString("PINECORE_REGION", config.PinecoreRegion)
+	config.PinecoreEmbedModel = getEnvString("PINECORE_EMBED_MODEL", config.PinecoreEmbedModel)
+	config.LocalDBPath = getEnvString("LOCAL_DB_PATH", config.LocalDBPath)
+	config.LocalMySQLDSN = getEnvString("LOCAL_MYSQL_DSN", config.LocalMySQLDSN)
+	config.LocalMySQLTable = getEnvString("LOCAL_MYSQL_TABLE", config.LocalMySQLTable)
+
+	if config.LocalVectorDim, err = getEnvInt("LOCAL_VECTOR_DIMENSION", config.LocalVectorDim); err != nil {
+		return err
+	}
 
 	if config.ContextLimit, err = getEnvInt("CONTEXT_LIMIT", config.ContextLimit); err != nil {
 		return err

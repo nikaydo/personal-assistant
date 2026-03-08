@@ -31,12 +31,8 @@ func SetupApi(config config.Config, log *logg.Logger) (API, error) {
 	apiLog.Info("Initializing integrations")
 
 	dbLog.Info("Initializing database client")
-	db, err := database.InitDB(config.DatabaseApiKey, &config)
+	db, err := database.InitDB(&config)
 	if err != nil {
-		return API{}, err
-	}
-
-	if err := db.WaitIndexReady(config.IndexName, dbLog); err != nil {
 		return API{}, err
 	}
 

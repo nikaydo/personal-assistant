@@ -24,7 +24,7 @@ type Ai struct {
 	Logger *logg.Logger
 }
 
-func Init(config config.Config, aiLog *logg.Logger, db *database.DBase) *Ai {
+func Init(config config.Config, aiLog *logg.Logger, db *database.Database) *Ai {
 	queueLog := aiLog.WithModule("QUEUE")
 	queue := llmcalls.NewQueue(config, 64, queueLog)
 	queue.QueueStart()

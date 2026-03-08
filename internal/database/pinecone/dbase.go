@@ -1,4 +1,4 @@
-package database
+package pinecone
 
 import (
 	"context"
@@ -18,27 +18,13 @@ type DBase struct {
 	Cfg       *config.Config
 }
 
-func InitDB(apikey string, cfg *config.Config) (*DBase, error) {
-	pc, err := pinecone.NewClient(pinecone.NewClientParams{
-		ApiKey: apikey,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create client: %w", err)
-	}
-
-	return &DBase{
-		Client: pc,
-		Cfg:    cfg,
-	}, nil
-}
-
 func (db *DBase) CreateIndex() error {
 	index, err := db.Client.CreateIndexForModel(context.Background(), &pinecone.CreateIndexForModelRequest{
-		Name:   db.Cfg.IndexName,
-		Cloud:  pinecone.Cloud(db.Cfg.Cloud),
-		Region: db.Cfg.Region,
+		Name:   db.Cfg.PinecoreIndexName,
+		Cloud:  pinecone.Cloud(db.Cfg.PinecoreCloud),
+		Region: db.Cfg.PinecoreRegion,
 		Embed: pinecone.CreateIndexForModelEmbed{
-			Model: db.Cfg.EmbedModel,
+			Model: db.Cfg.PinecoreEmbedModel,
 			FieldMap: map[string]any{
 				"text":       "text",
 				"category":   "category",

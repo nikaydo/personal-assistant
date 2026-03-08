@@ -6,25 +6,28 @@ import (
 
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/database"
+	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
 	"github.com/nikaydo/personal-assistant/internal/logg"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
+var mem string = "Long-term conversation memory:"
+
 type Memory struct {
-	//системная память для промта
+	//системная память
 	SystemMemory string
 	//информация о пользователе
-	UserProfile string
+	UserProfile []History
 	//tools memory - информация о доступных инструментах и их состоянии
-	ToolsMemory string
+	ToolsMemory []History
 	//долгосрочная память
-	LongTerm string
+	LongTerm []History
 	//краткосрочная память
-	ShortTerm []ShortTerm
+	ShortTerm []History
 
 	Tokens ContextTokens
 
-	DBase *database.DBase
+	DBase *database.Database
 
 	Logger *logg.Logger
 	Cfg    config.Config
@@ -32,7 +35,7 @@ type Memory struct {
 	mu sync.RWMutex
 }
 
-type ShortTerm struct {
+type History struct {
 	Question ShotTermQuestion `json:"question"`
 	Answer   ShotTermAnswer   `json:"answer"`
 	Model    string           `json:"model"`
@@ -49,10 +52,12 @@ type ShotTermAnswer struct {
 	Usage models.Usage
 }
 
-func (m *Memory) Memory(question string, answer models.ResponseBody) {
+func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmcalls.Queue, model string) {
 	// сохраняем в краткосрочной памяти вопрос и ответ
 	m.FillShortMemory(question, answer)
-	m.SummaryShortMemory("")
+	if err := m.SummaryShortMemory(mem, Queue, model); err != nil {
+		m.Logger.Error("SummaryShortMemory: failed to summarize short-term memory:", err)
+	}
 	// рассчитываем коэффициент контекста
 	m.Tokens.ContextCoeffCalc(question, answer)
 	m.Logger.Memory("ContextCoeffCalc: calculated context coefficient", "context_coeff", fmt.Sprintf("%v/[%v]", m.Tokens.GetContextCoeff(), m.Tokens.ContextCoeff), "total_tokens", answer.Usage.TotalTokens, "symbols_in_context", m.Tokens.CountSymbolsInContext)
@@ -139,6 +144,7 @@ func (m *Memory) LongMemoryFill(msg []models.Message) []models.Message {
 		m.Logger.Memory("LongMemoryFill: long-term memory is disabled, skipping long-term memory in context")
 		return msg
 	}
+
 	return msg
 }
 
@@ -163,7 +169,7 @@ func (m *Memory) ShortMemoryFill(msg []models.Message, ShortTermTokens *int) []m
 func (m *Memory) FillShortMemory(question string, answer models.ResponseBody) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.ShortTerm = append(m.ShortTerm, ShortTerm{
+	m.ShortTerm = append(m.ShortTerm, History{
 		Question: ShotTermQuestion{Text: question},
 		Answer:   ShotTermAnswer{Text: answer.Choices[0].Message.Content, Usage: answer.Usage},
 		Model:    answer.Model,
