@@ -3,30 +3,29 @@ package ai
 import (
 	"fmt"
 
-	"github.com/nikaydo/personal-assistant/internal/ai/memory"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
 	mod "github.com/nikaydo/personal-assistant/internal/models"
 )
 
-func (ai *Ai) MakeAsk(q mod.Message, tools []mod.Tool) (mod.ResponseBody, error) {
+func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 	ai.Logger.Question(q)
-	history := ai.Memory.HistoryMessage(q, ai.Config.PromtSystemChat)
+	history := ai.Memory.MessageWithHistory(q, ai.Config.PromtSystemChat)
 	ai.Logger.Info(
 		"MakeAsk: sending LLM request",
 		"history_messages", len(history),
 		"tools_count", len(tools),
 	)
-	resp, err := llmcalls.Ask(ai.makeBody(history, tools), ai.Config)
+	respLLM, err := ai.Queue.AddToQueue(llmcalls.QueueItem{Body: ai.makeBody(history, tools)})
 	if err != nil {
 		ai.Logger.Error("MakeAsk: ask request failed:", err)
 		return mod.ResponseBody{}, err
 	}
-	if resp.Error.Message != "" {
-		ai.Logger.Error(resp.Error)
-		return mod.ResponseBody{}, fmt.Errorf("error: %s", resp.Error.Message)
+	if respLLM.Error.Message != "" {
+		ai.Logger.Error(respLLM.Error)
+		return mod.ResponseBody{}, fmt.Errorf("error: %s", respLLM.Error.Message)
 	}
 
-	msgChoice, err := firstChoice(resp)
+	msgChoice, err := firstChoice(respLLM)
 	if err != nil {
 		ai.Logger.Error("MakeAsk: firstChoice failed:", err)
 		return mod.ResponseBody{}, err
@@ -34,16 +33,15 @@ func (ai *Ai) MakeAsk(q mod.Message, tools []mod.Tool) (mod.ResponseBody, error)
 
 	if len(msgChoice.ToolCalls) > 0 {
 		ai.Logger.Info("MakeAsk: model requested tool call", "tool_calls_count", len(msgChoice.ToolCalls))
-		if msgChoice.Content != "" {
-			ai.Memory.FillShortMemory(q.Content, msgChoice.Content)
-		}
-		ai.Logger.Task("isTool", resp)
-		resp, err := ai.isTool(resp, q)
+		// if msgChoice.Content != "" {
+		// 	ai.Memory.FillShortMemory(q.Content, msgChoice.Content)
+		// }
+		ai.Logger.Task("isTool", respLLM)
+		resp, err := ai.isTool(respLLM)
 		if err != nil {
 			ai.Logger.Error("MakeAsk: tool execution failed:", err)
 			return resp, err
 		}
-		ai.Logger.Task("isTool Out", resp)
 		ai.Logger.Answer(resp)
 		return resp, nil
 	}
@@ -53,23 +51,12 @@ func (ai *Ai) MakeAsk(q mod.Message, tools []mod.Tool) (mod.ResponseBody, error)
 		ai.Logger.Error("MakeAsk:", err)
 		return mod.ResponseBody{}, err
 	}
-	ai.Memory.FillShortMemory(q.Content, msgChoice.Content)
-	ai.Logger.Info("MakeAsk: summary step check", "short_memory_len", ai.Memory.ShortTermLen(), "summary_counter", ai.Memory.SummaryCounter())
-	if run, snapshot := ai.Memory.PlanSummaryRun(); run {
-		go func(data []memory.ShortTerm) {
-			defer ai.Memory.FinishSummaryRun()
-			if err := ai.Memory.SummMemoryFromSnapshot(data); err != nil {
-				ai.Logger.Error("SummMemoryFromSnapshot:", err)
-			}
-		}(snapshot)
-	}
-
-	ai.Memory.CheckLimits()
-	ai.Logger.Answer(resp)
-	return resp, nil
+	ai.Memory.Memory(q, respLLM)
+	ai.Logger.Answer(respLLM)
+	return respLLM, nil
 }
 
-func (ai *Ai) isTool(resp mod.ResponseBody, q mod.Message) (mod.ResponseBody, error) {
+func (ai *Ai) isTool(resp mod.ResponseBody) (mod.ResponseBody, error) {
 	tc, err := firstToolCall(resp)
 	if err != nil {
 		ai.Logger.Error("isTool: firstToolCall failed:", err)

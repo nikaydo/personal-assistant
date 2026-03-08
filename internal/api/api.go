@@ -49,11 +49,7 @@ func SetupApi(config config.Config, log *logg.Logger) (API, error) {
 			Port: strconv.Itoa(config.ApiPort),
 		},
 		Router: chi.NewRouter(),
-		Ai: &ai.Ai{
-			Memory: &ai.Memory{DBase: db, Cfg: &config, Logger: aiLog},
-			Config: config,
-			Logger: aiLog,
-		},
+		Ai:     ai.Init(config, aiLog, db),
 	}
 
 	return a, nil

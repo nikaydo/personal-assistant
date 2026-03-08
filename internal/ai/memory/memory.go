@@ -1,167 +1,174 @@
 package memory
 
 import (
-	"bytes"
-	"encoding/json"
-	"io"
-	"net/http"
+	"fmt"
 	"sync"
 
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/database"
 	"github.com/nikaydo/personal-assistant/internal/logg"
 	"github.com/nikaydo/personal-assistant/internal/models"
-	mod "github.com/nikaydo/personal-assistant/internal/models"
 )
-
-/*
-
-пользователь пишет сообщение
-ии отвечает
-перед следующим сообщение собираеться история диалога 1 кс память (сообщения вопрос ответ user assistant) 2 дс память (релевантные данные по вопросу)
-
-1. из бд на пк пользователя +
-1. просто вставляеться в конткст +
-
-2. собираеться кс память без дс памяти и делаеться запрос к llm c принудительным вызовом tool
-2. llm возвращяет параметры для получения релевантных данных и делаеться запрос к бд
-2. данные из бд вставляються в диалог
-
-переоформление дс памяти происходит раз в 5 сообщений пользователя
-
-*/
 
 type Memory struct {
 	//системная память для промта
 	SystemMemory string
 	//информация о пользователе
 	UserProfile string
-	//информация о фильтрах и которые можно применить
-	SystemMemoryInfo string
+	//tools memory - информация о доступных инструментах и их состоянии
+	ToolsMemory string
 	//долгосрочная память
 	LongTerm string
 	//краткосрочная память
 	ShortTerm []ShortTerm
 
-	Count int
+	Tokens ContextTokens
 
 	DBase *database.DBase
 
 	Logger *logg.Logger
-	Cfg    *config.Config
+	Cfg    config.Config
 
-	mu             sync.RWMutex
-	summaryRunning bool
+	mu sync.RWMutex
 }
 
 type ShortTerm struct {
-	UserQuestion  string `json:"user_question"`
-	LLMAnswer     string `json:"llm_answer"`
-	TotalTokens   int    `json:"total_tokens"`
-	CurrentTokens int    `json:"current_tokens"`
+	Question ShotTermQuestion `json:"question"`
+	Answer   ShotTermAnswer   `json:"answer"`
+	Model    string           `json:"model"`
+	Id       string           `json:"id"`
+	Created  int64            `json:"created"`
 }
 
-func (st *Memory) FillShortMemory(q, a string) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	st.ShortTerm = append(st.ShortTerm, ShortTerm{UserQuestion: q, LLMAnswer: a})
+type ShotTermQuestion struct {
+	Text string
 }
 
-// недописано
-func (mem *Memory) GetEmbending(r mod.ResponseBody) {
-	mem.Logger.Memory("GetEmbending start", "model", mem.Cfg.ModelEmbending)
-	body := mod.RequestBody{
-		Model: mem.Cfg.ModelEmbending,
-		Input: r.GetContent(),
-	}
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		mem.Logger.Error("GetEmbending: json marshal failed:", err)
-		return
-	}
-	req, err := http.NewRequest("POST", mem.Cfg.ApiUrlOpenrouterEmbeddings, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		mem.Logger.Error("GetEmbending: create request failed:", err)
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+mem.Cfg.ApiKeyOpenrouter)
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		mem.Logger.Error("GetEmbending: request failed:", err)
-		return
-	}
-	defer resp.Body.Close()
-	mem.Logger.Memory("GetEmbending response", "status", resp.StatusCode)
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		mem.Logger.Error("GetEmbending: read response failed:", err)
-		return
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		mem.Logger.Error("GetEmbending unexpected status", "status", resp.StatusCode, "body", string(respBody))
-		return
-	}
-	var embending models.EmbendingResponse
-	err = json.Unmarshal(respBody, &embending)
-	if err != nil {
-		mem.Logger.Error("GetEmbending: unmarshal failed:", err)
-		return
-	}
-	mem.Logger.Memory("GetEmbending parsed", "embeddings", len(embending.Data))
-
+type ShotTermAnswer struct {
+	Text  string
+	Usage models.Usage
 }
 
-func (mem *Memory) HistoryMessage(q mod.Message, promt string) []mod.Message {
-	shortTerm := mem.ShortTermSnapshot()
-	msg := make([]mod.Message, 0, len(shortTerm)*2+2)
-	if promt != "" {
-		msg = append(msg, mod.Message{
-			Role:    "system",
-			Content: promt,
+func (m *Memory) Memory(question string, answer models.ResponseBody) {
+	// сохраняем в краткосрочной памяти вопрос и ответ
+	m.FillShortMemory(question, answer)
+	m.SummaryShortMemory("")
+	// рассчитываем коэффициент контекста
+	m.Tokens.ContextCoeffCalc(question, answer)
+	m.Logger.Memory("ContextCoeffCalc: calculated context coefficient", "context_coeff", fmt.Sprintf("%v/[%v]", m.Tokens.GetContextCoeff(), m.Tokens.ContextCoeff), "total_tokens", answer.Usage.TotalTokens, "symbols_in_context", m.Tokens.CountSymbolsInContext)
+}
+
+func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	messages := []models.Message{}
+	m.Tokens.CountSymbolsInContext = 0
+	var systemPromptTokens, ShortTermTokens *int = new(int), new(int)
+	//добавляем в историю системный промт
+	messages = m.SystemPromptFill(systemPrompt, messages, systemPromptTokens)
+	//добавляем в историю сообщения из системной памяти
+	messages = m.SystemMemoryFill(messages)
+	//добавляем в историю сообщения из информации о пользователе
+	messages = m.UserProfileFill(messages)
+	//добавляем в историю сообщения из истории выполнения функций
+	messages = m.ToolsMemoryFill(messages)
+	//добавляем в историю сообщения из долгосрочной памяти
+	messages = m.LongMemoryFill(messages)
+	//добавляем в историю сообщения из краткосрочной памяти
+	messages = m.ShortMemoryFill(messages, ShortTermTokens)
+	var questionTokens int
+	//добавляем в историю текущий вопрос
+	if q != "" {
+		messages = append(messages, models.Message{
+			Role:    "user",
+			Content: q,
 		})
+		m.Tokens.CountSymbolsInContext += len(q)
+		questionTokens = int(float32(len(q)) / m.Tokens.GetContextCoeff())
 	}
-	for _, v := range shortTerm {
-		msg = append(msg,
-			mod.Message{Role: "user", Content: v.UserQuestion},
-			mod.Message{Role: "assistant", Content: v.LLMAnswer})
-	}
-	return append(msg, q)
+	m.Logger.Memory("MessageWithHistory: prepared messages with history for LLM request", "system_prompt_tokens", systemPromptTokens, "short_term_tokens", ShortTermTokens, "question_tokens", questionTokens, "total_context_tokens", *systemPromptTokens+*ShortTermTokens+questionTokens, "context_limit", m.Tokens.ContextLimit, "context_coeff", m.Tokens.ContextCoeff)
+	m.Logger.Info("Memory with history", "messages_count", len(messages))
+	return messages
 }
 
-func (mem *Memory) collectShortMemory(count int, promt string, shortTerm []ShortTerm) []mod.Message {
-	msg := []mod.Message{{
+func (m *Memory) SystemPromptFill(systemPrompt string, msg []models.Message, systemPromptTokens *int) []models.Message {
+	if m.Tokens.SystemPromptPercent == 0 {
+		m.Logger.Memory("SystemMemoryFill: system memory is disabled, skipping system prompt in context")
+		return msg
+	}
+	if systemPrompt == "" {
+		m.Logger.Memory("SystemMemoryFill: system prompt is empty, skipping system prompt in context")
+		return msg
+	}
+	if float32(len(systemPrompt))/m.Tokens.GetContextCoeff() > float32(m.Tokens.SystemPromptPercent) {
+		m.Logger.Memory("SystemMemoryFill: system prompt exceeds system prompt percent, skipping system prompt in context", "system_prompt_length", len(systemPrompt), "system_prompt_percent", m.Tokens.SystemPromptPercent, "context_coeff", m.Tokens.GetContextCoeff())
+		return msg
+	}
+	msg = append(msg, models.Message{
 		Role:    "system",
-		Content: promt,
-	}}
-	for _, v := range shortTerm[len(shortTerm)-count:] {
-		msg = append(msg,
-			mod.Message{Role: "user", Content: v.UserQuestion},
-			mod.Message{Role: "assistant", Content: v.LLMAnswer})
+		Content: systemPrompt,
+	})
+	m.Tokens.CountSymbolsInContext += len(systemPrompt)
+	*systemPromptTokens = int(float32(len(systemPrompt)) / m.Tokens.GetContextCoeff())
+	return msg
+}
+
+func (m *Memory) SystemMemoryFill(msg []models.Message) []models.Message {
+
+	return msg
+}
+
+func (m *Memory) UserProfileFill(msg []models.Message) []models.Message {
+	if m.Tokens.UserProfileLimit == 0 {
+		m.Logger.Memory("UserProfileFill: user profile memory is disabled, skipping user profile in context")
+		return msg
 	}
 	return msg
 }
 
-func (mem *Memory) ShortTermSnapshot() []ShortTerm {
-	mem.mu.RLock()
-	defer mem.mu.RUnlock()
-	if len(mem.ShortTerm) == 0 {
-		return nil
+func (m *Memory) ToolsMemoryFill(msg []models.Message) []models.Message {
+	if m.Tokens.ToolsMemoryLimit == 0 {
+		m.Logger.Memory("ToolsMemoryFill: tools memory is disabled, skipping tools memory in context")
+		return msg
 	}
-	snapshot := make([]ShortTerm, len(mem.ShortTerm))
-	copy(snapshot, mem.ShortTerm)
-	return snapshot
+	return msg
 }
 
-func (mem *Memory) ShortTermLen() int {
-	mem.mu.RLock()
-	defer mem.mu.RUnlock()
-	return len(mem.ShortTerm)
+func (m *Memory) LongMemoryFill(msg []models.Message) []models.Message {
+	if m.Tokens.LongTermLimit == 0 {
+		m.Logger.Memory("LongMemoryFill: long-term memory is disabled, skipping long-term memory in context")
+		return msg
+	}
+	return msg
 }
 
-func (mem *Memory) SummaryCounter() int {
-	mem.mu.RLock()
-	defer mem.mu.RUnlock()
-	return mem.Count
+func (m *Memory) ShortMemoryFill(msg []models.Message, ShortTermTokens *int) []models.Message {
+	for i := range m.ShortTerm {
+		msg = append(msg,
+			models.Message{
+				Role:    "user",
+				Content: m.ShortTerm[i].Question.Text,
+			}, models.Message{
+				Role:    "assistant",
+				Content: m.ShortTerm[i].Answer.Text,
+			})
+
+		symbolsInMsg := len(m.ShortTerm[i].Question.Text) + len(m.ShortTerm[i].Answer.Text)
+		*ShortTermTokens += int(float32(symbolsInMsg) / m.Tokens.GetContextCoeff())
+		m.Tokens.CountSymbolsInContext += symbolsInMsg
+	}
+	return msg
+}
+
+func (m *Memory) FillShortMemory(question string, answer models.ResponseBody) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ShortTerm = append(m.ShortTerm, ShortTerm{
+		Question: ShotTermQuestion{Text: question},
+		Answer:   ShotTermAnswer{Text: answer.Choices[0].Message.Content, Usage: answer.Usage},
+		Model:    answer.Model,
+		Id:       answer.ID,
+		Created:  answer.Created,
+	})
+	m.Tokens.MessageCount++
 }

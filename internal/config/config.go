@@ -24,14 +24,18 @@ type Config struct {
 	EmbedModel     string `json:"embedModel"`
 
 	//Config for context
-	MaxContextSize       int `json:"max_tokens_context"`
-	HighBorderMaxContext int `json:"high_border_max_context"`
-	SummaryMemoryStep    int `json:"summary_memory_step"`
-	//Config for Jira
-	JiraApiKey      string `json:"jira_api_key"`
-	JiraEmail       string `json:"jira_email"`
-	JiraPersonalUrl string `json:"jira_personal_url"`
-
+	ContextLimit             int     `json:"context_limit"`
+	ContextSavedForResponse  int     `json:"context_saved_for_response"`
+	SummaryMemoryStep        int     `json:"summary_memory_step"`
+	ContextCoeff             float32 `json:"context_coeff"`
+	ContextCoeffCount        int     `json:"context_coeff_count"`
+	SystemMemoryPercent      int     `json:"system_memory_percent"`
+	UserProfilePercent       int     `json:"user_profile_percent"`
+	ToolsMemoryPercent       int     `json:"tools_memory_percent"`
+	LongTermPercent          int     `json:"long_term_percent"`
+	ShortTermPercent         int     `json:"short_term_percent"`
+	SystemPromptPercent      int     `json:"system_prompt_percent"`
+	ShortMemoryMessagesCount int     `json:"short_memory_messages_count"`
 	//Api config
 	ApiHost string `json:"api_host"`
 	ApiPort int    `json:"api_port"`
@@ -40,9 +44,6 @@ type Config struct {
 	PromtSystemChat        string `json:"promt_system_chat"`
 	PromtMemorySummary     string `json:"promt_memory_summary"`
 	MemorySummaryUserPromt string `json:"memory_summary_user_promt"`
-
-	SpotifyRefresh string `json:"spotify_refresh"`
-	SpotifyAccess  string `json:"spotify_access"`
 }
 
 func ConfigRead(path string) (*Config, error) {
@@ -70,18 +71,15 @@ func applyEnvOverrides(config *Config) error {
 	config.ApiUrlOpenrouter = getEnvString("API_URL_OPENROUTER", config.ApiUrlOpenrouter)
 	config.ApiUrlOpenrouterEmbeddings = getEnvString("API_URL_OPENROUTER_EMBEDDINGS", config.ApiUrlOpenrouterEmbeddings)
 
-	if config.MaxContextSize, err = getEnvInt("MAX_TOKENS_CONTEXT", config.MaxContextSize); err != nil {
+	if config.ContextLimit, err = getEnvInt("CONTEXT_LIMIT", config.ContextLimit); err != nil {
 		return err
 	}
-	if config.HighBorderMaxContext, err = getEnvInt("HIGH_BORDER_MAX_CONTEXT", config.HighBorderMaxContext); err != nil {
+	if config.ContextSavedForResponse, err = getEnvInt("CONTEXT_SAVED_FOR_RESPONSE", config.ContextSavedForResponse); err != nil {
 		return err
 	}
 	if config.SummaryMemoryStep, err = getEnvInt("SUMMARY_MEMORY_STEP", config.SummaryMemoryStep); err != nil {
 		return err
 	}
-	config.JiraApiKey = getEnvString("JIRA_API_KEY", config.JiraApiKey)
-	config.JiraEmail = getEnvString("JIRA_EMAIL", config.JiraEmail)
-	config.JiraPersonalUrl = getEnvString("JIRA_PERSONAL_URL", config.JiraPersonalUrl)
 
 	config.ApiHost = getEnvString("API_HOST", config.ApiHost)
 	if config.ApiPort, err = getEnvInt("API_PORT", config.ApiPort); err != nil {

@@ -8,13 +8,8 @@ import (
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
-type Query struct {
-	Message string `json:"message"`
-	Type    string `json:"type,omitempty"`
-}
-
 func (api *API) chat(w http.ResponseWriter, r *http.Request) {
-	var Query Query
+	var Query models.Query
 	err := json.NewDecoder(r.Body).Decode(&Query)
 	if err != nil {
 		api.Ai.Logger.Error("chat decode failed:", err)
@@ -28,8 +23,7 @@ func (api *API) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.Ai.Logger.Info("chat request accepted", "message_len", len(Query.Message), "type", Query.Type)
-
-	msg, err := api.Ai.MakeAsk(models.Message{Role: "user", Content: Query.Message}, []models.Tool{})
+	msg, err := api.Ai.MakeAsk(Query.Message, []models.Tool{})
 	if err != nil {
 		api.Ai.Logger.Error("chat processing failed:", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -62,7 +56,7 @@ func (api *API) GetMemory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *API) GetMessage(w http.ResponseWriter, r *http.Request) {
-	b, err := json.Marshal(api.Ai.Memory.HistoryMessage(models.Message{}, "system promt"))
+	b, err := json.Marshal(api.Ai.Memory.MessageWithHistory("", api.Ai.Config.PromtSystemChat))
 	if err != nil {
 		api.Ai.Logger.Error("GetMessage marshal failed:", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -1,6 +1,7 @@
 package models
 
 import (
+	apimodels "github.com/nikaydo/personal-assistant/internal/models/api"
 	chatmodels "github.com/nikaydo/personal-assistant/internal/models/chat"
 	openroutermodels "github.com/nikaydo/personal-assistant/internal/models/openrouter"
 	toolmodels "github.com/nikaydo/personal-assistant/internal/models/tool"
@@ -13,7 +14,7 @@ type ToolFunction = toolmodels.ToolFunction
 type ToolFunctionParseResponse = toolmodels.ToolFunctionParseResponse
 
 type Message = chatmodels.Message
-
+type Error = openroutermodels.Error
 type RequestBody = openroutermodels.RequestBody
 type Provider = openroutermodels.Provider
 type PreferedMinThroughput = openroutermodels.PreferedMinThroughput
@@ -33,6 +34,8 @@ type Usage = openroutermodels.Usage
 type PromptTokensDetails = openroutermodels.PromptTokensDetails
 type CostDetails = openroutermodels.CostDetails
 type CompletionTokensDetails = openroutermodels.CompletionTokensDetails
+
+type Query = apimodels.Query
 
 func ExtractJSON(s string) (string, error) {
 	return openroutermodels.ExtractJSON(s)

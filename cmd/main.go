@@ -31,7 +31,11 @@ func main() {
 
 	aiLog.Info("Loading model metadata")
 	api.Ai.GetModelData()
-	aiLog.Info(fmt.Sprintf("Context length: %d", api.Ai.Context.ContextLeghtMax))
+	aiLog.Info(fmt.Sprintf("Context length: %d", api.Ai.Memory.Tokens.ContextLimit))
+
+	api.Ai.Memory.Tokens.CalculateContextLimit(api.Ai.Config)
+	api.Ai.Logger.Memory("CalculateContextLimit: calculated context limit for each memory type", "system_memory_tokens", api.Ai.Memory.Tokens.SystemMemoryLimit, "user_profile_tokens", api.Ai.Memory.Tokens.UserProfileLimit, "tools_memory_tokens", api.Ai.Memory.Tokens.ToolsMemoryLimit, "long_term_tokens", api.Ai.Memory.Tokens.LongTermLimit, "short_term_tokens", api.Ai.Memory.Tokens.ShortTermLimit)
+
 	api.SetupRoutes()
 	apiLog.Info("Routes setup")
 	systemLog.Info(fmt.Sprintf("Server starting on addr %s:%d", config.ApiHost, config.ApiPort))

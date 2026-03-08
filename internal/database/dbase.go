@@ -12,15 +12,13 @@ import (
 )
 
 type DBase struct {
-	Client     *pinecone.Client
-	Index      *pinecone.Index
-	IndexConn  *pinecone.IndexConnection
-	Capability []Capability
-	Cfg        *config.Config
+	Client    *pinecone.Client
+	Index     *pinecone.Index
+	IndexConn *pinecone.IndexConnection
+	Cfg       *config.Config
 }
 
 func InitDB(apikey string, cfg *config.Config) (*DBase, error) {
-
 	pc, err := pinecone.NewClient(pinecone.NewClientParams{
 		ApiKey: apikey,
 	})

@@ -37,7 +37,7 @@ func doReq(buf []byte, url, token, method string) ([]byte, error) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("HTTP-Referer", "http://localhost")
-	req.Header.Set("X-Title", "personal assistant")
+	req.Header.Set("X-Title", "narria")
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
