@@ -84,6 +84,19 @@ Personal assistant - локальный Go-сервис, который прин
 
 ## Запуск
 
+### Подготовка MySQL (локальный режим)
+
+Перед первым запуском в режиме local DB создайте БД и пользователя:
+
+```bash
+mysql -u root -p < scripts/mysql_bootstrap.sql
+```
+
+После этого укажите `local_mysql_dsn` в `settings.json` (или `LOCAL_MYSQL_DSN`) для созданного пользователя, например:
+`assistant_app:change_me_strong_password@tcp(127.0.0.1:3306)/assistant?parseTime=true`.
+
+### Старт сервиса
+
 ```bash
 go run ./cmd
 ```

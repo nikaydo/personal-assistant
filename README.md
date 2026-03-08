@@ -84,6 +84,19 @@ Personal assistant is a local Go service that accepts chat requests, calls OpenR
 
 ## Run
 
+### MySQL bootstrap (local mode)
+
+Before first run in local DB mode, create database/user:
+
+```bash
+mysql -u root -p < scripts/mysql_bootstrap.sql
+```
+
+Then set `local_mysql_dsn` in `settings.json` (or `LOCAL_MYSQL_DSN`) to the created user, for example:
+`assistant_app:change_me_strong_password@tcp(127.0.0.1:3306)/assistant?parseTime=true`.
+
+### Start service
+
 ```bash
 go run ./cmd
 ```

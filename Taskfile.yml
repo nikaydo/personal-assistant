@@ -1,0 +1,68 @@
+version: '3'
+
+tasks:
+  bootstrap-mysql:
+    desc: Bootstrap MySQL user/db from LOCAL_MYSQL_DSN or settings.json local_mysql_dsn
+    cmds:
+      - |
+        bash <<'BASH'
+        set -euo pipefail
+        DB_CLIENT="$(command -v mariadb || command -v mysql)"
+        if [ -z "$DB_CLIENT" ]; then
+          echo "mariadb/mysql client not found in PATH" >&2
+          exit 1
+        fi
+        ROOT_USER="${MYSQL_ROOT_USER:-root}"
+        DSN="${LOCAL_MYSQL_DSN:-}"
+        if [ -z "$DSN" ] && [ -f settings.json ]; then
+          if command -v jq >/dev/null 2>&1; then
+            DSN="$(jq -r ".local_mysql_dsn // \"\"" settings.json)"
+          else
+            DSN="$(sed -n 's/^[[:space:]]*"local_mysql_dsn"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' settings.json | head -n 1)"
+          fi
+        fi
+        if [ -z "$DSN" ]; then
+          echo "LOCAL_MYSQL_DSN is empty and settings.json local_mysql_dsn is not available" >&2
+          exit 1
+        fi
+        CREDS="${DSN%%@*}"
+        REST="${DSN#*@}"
+        DB_NAME="${REST#*/}"
+        DB_NAME="${DB_NAME%%\?*}"
+        DB_USER="${CREDS%%:*}"
+        DB_PASS="${CREDS#*:}"
+        if [ "$DB_PASS" = "$CREDS" ]; then
+          DB_PASS=""
+        fi
+        if [ -z "$DB_USER" ] || [ -z "$DB_NAME" ]; then
+          echo "Cannot parse user/database from DSN: $DSN" >&2
+          exit 1
+        fi
+        esc_sql() { printf "%s" "$1" | sed "s/'/''/g"; }
+        DB_NAME_ESC="$(esc_sql "$DB_NAME")"
+        DB_USER_ESC="$(esc_sql "$DB_USER")"
+        DB_PASS_ESC="$(esc_sql "$DB_PASS")"
+        SQL_TPL="$(cat scripts/mysql_bootstrap.sql)"
+        SQL="${SQL_TPL//__DB_NAME__/$DB_NAME_ESC}"
+        SQL="${SQL//__DB_USER__/$DB_USER_ESC}"
+        SQL="${SQL//__DB_PASSWORD__/$DB_PASS_ESC}"
+        echo "Bootstrapping MySQL for user=\"$DB_USER\" database=\"$DB_NAME\""
+        if [ -n "${MYSQL_ROOT_PASSWORD:-}" ]; then
+          printf "%s\n" "$SQL" | "$DB_CLIENT" -u "$ROOT_USER" -p"${MYSQL_ROOT_PASSWORD}"
+        elif [ "${MYSQL_USE_SUDO:-1}" = "1" ]; then
+          printf "%s\n" "$SQL" | sudo "$DB_CLIENT"
+        else
+          printf "%s\n" "$SQL" | "$DB_CLIENT" -u "$ROOT_USER" -p
+        fi
+        BASH
+
+  run:
+    desc: Start service (regular run)
+    cmds:
+      - go run ./cmd
+
+  first-run:
+    desc: First run bootstrap MySQL, then start service
+    cmds:
+      - task: bootstrap-mysql
+      - task: run

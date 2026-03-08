@@ -56,7 +56,7 @@ func NewMySQLStore(db *sql.DB, table string) (*MySQLStore, error) {
 	}
 
 	store := &MySQLStore{db: db, table: table}
-	if err := store.ensureSchema(); err != nil {
+	if err := store.runMigrations(); err != nil {
 		return nil, err
 	}
 	return store, nil
@@ -207,38 +207,4 @@ func (s *MySQLStore) SearchByFilters(filters MySQLFilters) ([]MySQLRecord, error
 		return nil, fmt.Errorf("iterate mysql summary rows: %w", err)
 	}
 	return result, nil
-}
-
-func (s *MySQLStore) ensureSchema() error {
-	q := fmt.Sprintf(`
-CREATE TABLE IF NOT EXISTS %s (
-	id VARCHAR(191) PRIMARY KEY,
-	category VARCHAR(255) NOT NULL,
-	goal VARCHAR(255) NOT NULL,
-	importance VARCHAR(64) NOT NULL,
-	status VARCHAR(64) NOT NULL,
-	text TEXT NOT NULL,
-	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`, s.table)
-
-	if _, err := s.db.Exec(q); err != nil {
-		return fmt.Errorf("ensure mysql schema: %w", err)
-	}
-	indexes := []string{
-		fmt.Sprintf(`CREATE INDEX idx_%s_category ON %s (category)`, s.table, s.table),
-		fmt.Sprintf(`CREATE INDEX idx_%s_goal ON %s (goal)`, s.table, s.table),
-		fmt.Sprintf(`CREATE INDEX idx_%s_importance ON %s (importance)`, s.table, s.table),
-		fmt.Sprintf(`CREATE INDEX idx_%s_status ON %s (status)`, s.table, s.table),
-		fmt.Sprintf(`CREATE INDEX idx_%s_updated_at ON %s (updated_at)`, s.table, s.table),
-	}
-	for _, idxQuery := range indexes {
-		if _, err := s.db.Exec(idxQuery); err != nil {
-			// MySQL returns "Duplicate key name" when index already exists.
-			if !strings.Contains(strings.ToLower(err.Error()), "duplicate key name") {
-				return fmt.Errorf("ensure mysql index: %w", err)
-			}
-		}
-	}
-	return nil
 }

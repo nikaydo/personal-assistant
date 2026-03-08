@@ -25,6 +25,7 @@ type ModelArchitecture = openroutermodels.ModelArchitecture
 type TopProvider = openroutermodels.TopProvider
 type DefaultParameters = openroutermodels.DefaultParameters
 type ModelData = openroutermodels.ModelData
+type EmbendingRequest = openroutermodels.EmbendingRequest
 type EmbendingResponse = openroutermodels.EmbendingResponse
 type ToolsChoise = openroutermodels.ToolsChoise
 type ToolsChoisePayload = openroutermodels.ToolsChoisePayload

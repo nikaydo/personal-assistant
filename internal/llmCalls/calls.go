@@ -29,6 +29,27 @@ func Ask(body models.RequestBody, cfg config.Config) (models.ResponseBody, error
 	return response, nil
 }
 
+func CreateEmbending(input string, cfg config.Config) (models.EmbendingResponse, error) {
+	body := models.EmbendingRequest{
+		Model: cfg.ModelEmbending,
+		Input: input,
+	}
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return models.EmbendingResponse{}, err
+	}
+	respBody, err := doReq(jsonBody, cfg.ApiUrlOpenrouterEmbeddings, cfg.ApiKeyOpenrouter, "POST")
+	if err != nil {
+		return models.EmbendingResponse{}, err
+	}
+	var response models.EmbendingResponse
+	err = json.Unmarshal(respBody, &response)
+	if err != nil {
+		return models.EmbendingResponse{}, err
+	}
+	return response, nil
+}
+
 func doReq(buf []byte, url, token, method string) ([]byte, error) {
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(buf))
 	if err != nil {

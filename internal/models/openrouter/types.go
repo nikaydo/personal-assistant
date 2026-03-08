@@ -19,6 +19,11 @@ type RequestBody struct {
 	ToolsChoise           any                   `json:"tool_choice,omitempty"`
 }
 
+type EmbendingRequest struct {
+	Model string `json:"model"`
+	Input string `json:"input"`
+}
+
 type ToolsChoise struct {
 	Type     string             `json:"type"`
 	Function ToolsChoisePayload `json:"function"`
