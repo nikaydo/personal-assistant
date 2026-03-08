@@ -44,6 +44,6 @@ func (m *Memory) SummaryShortMemory(prompt string, Queue *llmcalls.Queue, model 
 		return err
 	}
 
-	m.Logger.Memory("SummaryShortMemory: summarized short-term memory and updated long-term memory", "short_term_count", len(m.ShortTerm), "long_term_count", len(m.LongTerm))
+	m.Logger.Memory("SummaryShortMemory: summarized short-term memory and updated long-term memory")
 	return nil
 }
