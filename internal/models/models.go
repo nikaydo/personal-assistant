@@ -12,6 +12,7 @@ type Function = toolmodels.Function
 type ToolCall = toolmodels.ToolCall
 type ToolFunction = toolmodels.ToolFunction
 type ToolFunctionParseResponse = toolmodels.ToolFunctionParseResponse
+type SummarizeResponse toolmodels.SummarizeResponse
 
 type Message = chatmodels.Message
 type Error = openroutermodels.Error

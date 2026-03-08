@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/nikaydo/personal-assistant/internal/ai/tools"
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/database"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
@@ -24,6 +25,8 @@ type Memory struct {
 	LongTerm []History
 	//краткосрочная память
 	ShortTerm []History
+
+	Tools tools.Tool
 
 	Tokens ContextTokens
 

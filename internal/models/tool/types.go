@@ -26,3 +26,11 @@ type ToolFunctionParseResponse struct {
 	Name  string `json:"name"`
 	Group string `json:"group"`
 }
+
+type SummarizeResponse struct {
+	Category   string `json:"category"`
+	Goal       string `json:"goal"`
+	Importance string `json:"importance"`
+	Status     string `json:"status"`
+	Text       string `json:"text"`
+}

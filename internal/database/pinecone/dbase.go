@@ -11,6 +11,7 @@ import (
 	"github.com/nikaydo/personal-assistant/internal/config"
 	localCombinedDB "github.com/nikaydo/personal-assistant/internal/database/localCombinedDB"
 	"github.com/nikaydo/personal-assistant/internal/logg"
+	"github.com/nikaydo/personal-assistant/internal/models"
 	"github.com/pinecone-io/go-pinecone/v5/pinecone"
 )
 
@@ -112,7 +113,7 @@ func (db *DBase) EnsureReady() error {
 	return fmt.Errorf("index %s is not ready after 12 attempts", db.Cfg.PinecoreIndexName)
 }
 
-func (db *DBase) SaveSummary(id string, vector []float32, data localCombinedDB.SummarizeResponse) error {
+func (db *DBase) SaveSummary(id string, vector []float32, data models.SummarizeResponse) error {
 	if db.IndexConn == nil {
 		if err := db.EnsureReady(); err != nil {
 			return err
@@ -156,24 +157,24 @@ func (db *DBase) SaveSummary(id string, vector []float32, data localCombinedDB.S
 type SearchMatch struct {
 	ID        string
 	Score     float32
-	Data      localCombinedDB.SummarizeResponse
+	Data      models.SummarizeResponse
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
-func (db *DBase) GetSummary(id string) (localCombinedDB.SummarizeResponse, time.Time, time.Time, bool, error) {
+func (db *DBase) GetSummary(id string) (models.SummarizeResponse, time.Time, time.Time, bool, error) {
 	if db.IndexConn == nil {
 		if err := db.EnsureReady(); err != nil {
-			return localCombinedDB.SummarizeResponse{}, time.Time{}, time.Time{}, false, err
+			return models.SummarizeResponse{}, time.Time{}, time.Time{}, false, err
 		}
 	}
 	resp, err := db.IndexConn.FetchVectors(context.Background(), []string{id})
 	if err != nil {
-		return localCombinedDB.SummarizeResponse{}, time.Time{}, time.Time{}, false, fmt.Errorf("fetch pinecone vector: %w", err)
+		return models.SummarizeResponse{}, time.Time{}, time.Time{}, false, fmt.Errorf("fetch pinecone vector: %w", err)
 	}
 	vec, ok := resp.Vectors[id]
 	if !ok || vec == nil {
-		return localCombinedDB.SummarizeResponse{}, time.Time{}, time.Time{}, false, nil
+		return models.SummarizeResponse{}, time.Time{}, time.Time{}, false, nil
 	}
 	data, createdAt, updatedAt := summaryFromMetadata(vec.Metadata)
 	return data, createdAt, updatedAt, true, nil
@@ -301,8 +302,8 @@ func buildPineconeFilter(filters localCombinedDB.MySQLFilters) map[string]any {
 	return map[string]any{"$and": items}
 }
 
-func summaryFromMetadata(meta *pinecone.Metadata) (localCombinedDB.SummarizeResponse, time.Time, time.Time) {
-	out := localCombinedDB.SummarizeResponse{}
+func summaryFromMetadata(meta *pinecone.Metadata) (models.SummarizeResponse, time.Time, time.Time) {
+	out := models.SummarizeResponse{}
 	if meta == nil {
 		return out, time.Time{}, time.Time{}
 	}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
 type Dbase struct {
@@ -16,20 +18,20 @@ type Dbase struct {
 type DbaseVector = Dbase
 
 type SaveResult struct {
-	Vector HNSWRecord        `json:"vector"`
-	Data   SummarizeResponse `json:"data"`
+	Vector HNSWRecord               `json:"vector"`
+	Data   models.SummarizeResponse `json:"data"`
 }
 
 type FullRecord struct {
-	ID     string            `json:"id"`
-	Vector HNSWRecord        `json:"vector"`
-	Data   SummarizeResponse `json:"data"`
+	ID     string                   `json:"id"`
+	Vector HNSWRecord               `json:"vector"`
+	Data   models.SummarizeResponse `json:"data"`
 }
 
 type SearchResult struct {
-	ID       string            `json:"id"`
-	Distance float32           `json:"distance"`
-	Data     SummarizeResponse `json:"data"`
+	ID       string                   `json:"id"`
+	Distance float32                  `json:"distance"`
+	Data     models.SummarizeResponse `json:"data"`
 }
 
 func NewCombined(hnswStore *HNSWStore, mysqlStore *MySQLStore) (*Dbase, error) {
@@ -54,7 +56,7 @@ func Init(path string, dimension int, sqlDB *sql.DB, mysqlTable string) (*Dbase,
 	return NewCombined(hnswStore, mysqlStore)
 }
 
-func (db *Dbase) Save(id string, vector []float32, data SummarizeResponse) (SaveResult, error) {
+func (db *Dbase) Save(id string, vector []float32, data models.SummarizeResponse) (SaveResult, error) {
 	if db == nil || db.HNSW == nil || db.MySQL == nil {
 		return SaveResult{}, errors.New("combined db is not initialized")
 	}

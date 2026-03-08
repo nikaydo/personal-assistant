@@ -12,6 +12,7 @@ import (
 	"github.com/nikaydo/personal-assistant/internal/config"
 	localCombinedDB "github.com/nikaydo/personal-assistant/internal/database/localCombinedDB"
 	pn "github.com/nikaydo/personal-assistant/internal/database/pinecone"
+	"github.com/nikaydo/personal-assistant/internal/models"
 	"github.com/pinecone-io/go-pinecone/v5/pinecone"
 )
 
@@ -89,7 +90,7 @@ func hasSQLDriver(name string) bool {
 	return slices.Contains(sql.Drivers(), name)
 }
 
-func (db *Database) SaveSummary(id string, vector []float32, data localCombinedDB.SummarizeResponse) (localCombinedDB.SaveResult, error) {
+func (db *Database) SaveSummary(id string, vector []float32, data models.SummarizeResponse) (localCombinedDB.SaveResult, error) {
 	if db == nil {
 		return localCombinedDB.SaveResult{}, errors.New("database is nil")
 	}

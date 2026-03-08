@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/nikaydo/personal-assistant/internal/ai/memory"
+	"github.com/nikaydo/personal-assistant/internal/ai/tools"
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/database"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
@@ -14,6 +15,8 @@ import (
 type Ai struct {
 	Model     []string
 	ModelData []models.Model
+
+	Tools tools.Tool
 
 	Memory *memory.Memory
 
@@ -28,13 +31,15 @@ func Init(config config.Config, aiLog *logg.Logger, db *database.Database) *Ai {
 	queueLog := aiLog.WithModule("QUEUE")
 	queue := llmcalls.NewQueue(config, 64, queueLog)
 	queue.QueueStart()
-
+	tools := tools.Tool{Dbase: db, Cfg: config}
 	return &Ai{
 		Queue: queue,
+		Tools: tools,
 		Memory: &memory.Memory{
 			DBase:  db,
 			Cfg:    config,
 			Logger: aiLog,
+			Tools:  tools,
 			Tokens: memory.ContextTokens{
 				ContextCoeff: []float32{config.ContextCoeff},
 			},

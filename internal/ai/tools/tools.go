@@ -3,30 +3,28 @@ package tools
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
+	"github.com/google/uuid"
+	"github.com/nikaydo/personal-assistant/internal/config"
+	"github.com/nikaydo/personal-assistant/internal/database"
+	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
 type Tool struct {
-}
-
-type SummarizeResponse struct {
-	Category   string `json:"category"`
-	Goal       string `json:"goal"`
-	Importance string `json:"importance"`
-	Status     string `json:"status"`
-	Text       string `json:"text"`
+	Dbase *database.Database
+	Cfg   config.Config
 }
 
 func GetName(body models.ResponseBody) (string, error) {
-	var FuncName string
 	if len(body.Choices) == 0 {
 		return "", errors.New("body not have Choices")
 	}
 	if len(body.Choices[0].Message.ToolCalls) == 0 {
 		return "", errors.New("body not have ToolCalls")
 	}
-	return FuncName, json.Unmarshal([]byte(body.Choices[0].Message.ToolCalls[0].Function.Name), &FuncName)
+	return body.Choices[0].Message.ToolCalls[0].Function.Name, nil
 }
 
 func GetArgs(body models.ResponseBody, args any) error {
@@ -46,12 +44,18 @@ func (t *Tool) DetectChosenTool(body models.ResponseBody) error {
 	}
 	switch FuncName {
 	case "summarize":
-		var args SummarizeResponse
+		var args models.SummarizeResponse
 		if err := GetArgs(body, &args); err != nil {
 			return err
 		}
-		//создать вектор 
-		//сохранить в бд данные и сохранить в векторной бд вектор
+		emb, err := llmcalls.CreateEmbending(args.Text, t.Cfg)
+		if err != nil {
+			return err
+		}
+		if _, err := t.Dbase.SaveSummary(uuid.New().String(), emb.Data[0].Embedding, args); err != nil {
+			return err
+		}
+		return nil
 	}
-	return errors.New("unknown function")
+	return fmt.Errorf("unknown function: %s", FuncName)
 }

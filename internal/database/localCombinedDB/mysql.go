@@ -8,17 +8,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
 var validTableName = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
-
-type SummarizeResponse struct {
-	Category   string `json:"category"`
-	Goal       string `json:"goal"`
-	Importance string `json:"importance"`
-	Status     string `json:"status"`
-	Text       string `json:"text"`
-}
 
 type MySQLStore struct {
 	mu    sync.RWMutex
@@ -38,10 +32,10 @@ type MySQLFilters struct {
 }
 
 type MySQLRecord struct {
-	ID        string            `json:"id"`
-	Data      SummarizeResponse `json:"data"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	ID        string                   `json:"id"`
+	Data      models.SummarizeResponse `json:"data"`
+	CreatedAt time.Time                `json:"created_at"`
+	UpdatedAt time.Time                `json:"updated_at"`
 }
 
 func NewMySQLStore(db *sql.DB, table string) (*MySQLStore, error) {
@@ -62,7 +56,7 @@ func NewMySQLStore(db *sql.DB, table string) (*MySQLStore, error) {
 	return store, nil
 }
 
-func (s *MySQLStore) Upsert(id string, data SummarizeResponse) error {
+func (s *MySQLStore) Upsert(id string, data models.SummarizeResponse) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -88,22 +82,22 @@ ON DUPLICATE KEY UPDATE
 	return nil
 }
 
-func (s *MySQLStore) Get(id string) (SummarizeResponse, bool, error) {
+func (s *MySQLStore) Get(id string) (models.SummarizeResponse, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if id == "" {
-		return SummarizeResponse{}, false, errors.New("id is required")
+		return models.SummarizeResponse{}, false, errors.New("id is required")
 	}
 
 	q := fmt.Sprintf(`SELECT category, goal, importance, status, text FROM %s WHERE id = ? LIMIT 1`, s.table)
-	var out SummarizeResponse
+	var out models.SummarizeResponse
 	err := s.db.QueryRow(q, id).Scan(&out.Category, &out.Goal, &out.Importance, &out.Status, &out.Text)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return SummarizeResponse{}, false, nil
+			return models.SummarizeResponse{}, false, nil
 		}
-		return SummarizeResponse{}, false, fmt.Errorf("get mysql summary: %w", err)
+		return models.SummarizeResponse{}, false, fmt.Errorf("get mysql summary: %w", err)
 	}
 	return out, true, nil
 }
