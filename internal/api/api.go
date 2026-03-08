@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/nikaydo/personal-assistant/internal/ai"
@@ -16,6 +19,8 @@ type API struct {
 	Router *chi.Mux
 
 	Ai *ai.Ai
+
+	server *http.Server
 }
 
 type Addr struct {
@@ -52,7 +57,35 @@ func SetupApi(config config.Config, log *logg.Logger) (API, error) {
 }
 
 func (api *API) Start() error {
-	return http.ListenAndServe(api.Addr.Host+":"+api.Addr.Port, api.Router)
+	api.server = &http.Server{
+		Addr:              api.Addr.Host + ":" + api.Addr.Port,
+		Handler:           api.Router,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	return api.server.ListenAndServe()
+}
+
+func (api *API) Shutdown(ctx context.Context) error {
+	var errs []error
+
+	if api.Ai != nil && api.Ai.Queue != nil {
+		api.Ai.Queue.Stop()
+	}
+	if api.Ai != nil && api.Ai.Memory != nil && api.Ai.Memory.DBase != nil {
+		if err := api.Ai.Memory.DBase.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if api.server != nil {
+		if err := api.server.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func (api *API) SetupRoutes() {

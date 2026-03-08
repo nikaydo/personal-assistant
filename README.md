@@ -1,155 +1,225 @@
-﻿# Personal assistant
+# Personal Assistant
 
-Personal assistant is a local Go service that accepts chat requests, calls OpenRouter, and executes Jira actions via tool calls.
+![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)
+![API](https://img.shields.io/badge/API-HTTP%20JSON-2D7FF9)
+![Storage](https://img.shields.io/badge/Storage-Local%20%7C%20Pinecone-4C9A2A)
+![Memory](https://img.shields.io/badge/Memory-Short%20%2B%20Long-F59E0B)
+![Status](https://img.shields.io/badge/Status-Active-22C55E)
+
+> Local Go service for OpenRouter chat with layered memory (short-term + long-term) and pluggable vector storage.
 
 [Русская версия](README.ru.md)
 
-## Features
+---
 
-- `POST /chat` endpoint for user messages
-- Tool routing from LLM output
-- Jira tool execution:
-  - `create_project`
-  - `search_projects`
-  - `delete_project`
-- In-memory conversation history
-- `GET /memory` endpoint to inspect current history
+## Why This Project
 
-## How It Works
+Instead of a plain chat proxy, this service builds a memory-aware context on each request:
 
-1. Client sends a JSON request to `POST /chat`.
-2. Service builds context from:
-   - system prompt
-   - chat history
-   - new user message
-3. OpenRouter returns either plain text or `tool_calls`.
-4. If a tool call is returned, the service:
-   - parses tool arguments
-   - calls Jira API
-   - sends tool result back to the model (`role=tool`) to get a final response
-5. Service returns model response as JSON.
+- system prompt budget
+- recent dialog turns (short-term memory)
+- retrieved long-term summaries (vector search)
 
-## Project Structure
+Result: more stable, context-aware answers with predictable token budgeting.
 
-- `cmd/main.go` - entrypoint
-- `internal/config` - `settings.json` parsing
-- `internal/api` - HTTP routes and handlers
-- `internal/ai` - OpenRouter requests, tool routing, memory
-- `internal/jira` - Jira API wrapper
-- `internal/logg` - custom logger (`slog` + colored levels)
-- `internal/models` - DTOs split by domain:
-  - `internal/models/chat`
-  - `internal/models/tool`
-  - `internal/models/openrouter`
-  - `internal/models/jira`
+---
 
-## Configuration (`settings.json`)
+## At a Glance
 
-### Core fields
+| Area | What it does |
+|---|---|
+| API | `POST /chat`, `POST /memory`, `POST /msg` |
+| LLM | OpenRouter chat + embeddings |
+| Memory | In-process short-term + persisted long-term summaries |
+| Storage modes | Local (`HNSW + MySQL`) or Pinecone |
+| Runtime | Request queue, graceful shutdown, HTTP timeouts |
 
-- `api_key_openrouter` - OpenRouter API key. Create it here: <https://openrouter.ai/settings/keys>
-- `model_chat_openrouter` - list of chat models. The first one is primary, the rest are fallback options.
-- `model_embending_openrouter` - embedding model id for future long-memory/embedding flow.
-- `api_url_openrouter` - OpenRouter chat completions URL (usually `https://openrouter.ai/api/v1/chat/completions`).
+---
 
-### Jira fields
+## Module Readiness Matrix
 
-- `jira_api_key` - Atlassian API token. Create it here: <https://id.atlassian.com/manage-profile/security/api-tokens>
-- `jira_email` - Atlassian account email.
-- `jira_personal_url` - Jira base URL in format `https://<your-org>.atlassian.net`.
+| Module | Status | Notes |
+|---|---|---|
+| `internal/api` | Stable | Core endpoints and handlers are in place |
+| `internal/llmCalls` | Stable | Queue + request layer with tests |
+| `internal/ai/memory` | Stable | Context assembly + safer summarization commit |
+| `internal/database/localCombinedDB` | Stable | HNSW + MySQL combined storage |
+| `internal/database/pinecone` | Beta | Works when configured; less test depth than local mode |
+| Tool calls in `/chat` flow | Limited | Returns `501` when model emits `tool_calls` |
+| AuthN/AuthZ | Missing | Must be added for production exposure |
 
-### Service fields
+Legend: `Stable` = ready for regular use, `Beta` = usable with caveats, `Limited` = intentionally incomplete.
 
-- `api_host` - HTTP server host (usually `localhost`).
-- `api_port` - HTTP server port (usually `8080`).
+---
 
-### Prompt fields
+## Request Flow
 
-- `promt_system_chat` - main system prompt for assistant behavior.
-- `promt_memory_summary` - system prompt used for conversation summarization.
-- `memory_summary_user_promt` - user message used to trigger summary generation.
+```mermaid
+flowchart TD
+    A[Client: POST /chat] --> B[Build context]
+    B --> B1[System prompt]
+    B --> B2[Short-term history]
+    B --> B3[Long-term retrieval]
+    B3 --> E1[Create embedding]
+    E1 --> E2[Vector search]
+    B --> C[OpenRouter chat completion]
+    C --> D[Return answer]
+    D --> F[Store turn in short-term]
+    F --> G{Threshold reached?}
+    G -->|No| H[Done]
+    G -->|Yes| I[Summarize old turns via tool call]
+    I --> J[Persist summary to long-term DB]
+    J --> H
+```
 
-### Context control fields
+---
 
-- `max_tokens_context` - hard limit for context size.
-  - `0` means auto mode: service computes limit from selected models.
-- `high_border_max_context` - safety margin from maximum context window.
-  - example: if model context is `32000` and border is `5000`, effective limit is `27000`.
-- `summary_memory_step` - threshold for memory summarization step.
-- `division_coefficient` - divides available context into working areas (used by memory-limit logic).
+## Project Layout
 
-### Security note
+```text
+cmd/main.go                          # entrypoint, startup, shutdown
+internal/api                         # HTTP handlers and routes
+internal/ai                          # memory orchestration + model interaction
+internal/llmCalls                    # OpenRouter calls + queue
+internal/database                    # DB abstraction (local / pinecone)
+internal/database/localCombinedDB    # HNSW + MySQL implementation
+internal/config                      # settings + env overrides
+internal/models                      # DTOs
+internal/logg                        # structured logger
+```
 
-`settings.json` is plain text. Do not commit real keys/tokens. Prefer environment variables or a local ignored config file.
+---
 
-## Run
+## Configuration
 
-### MySQL bootstrap (local mode)
+### 1) OpenRouter
 
-Before first run in local DB mode, create database/user:
+- `api_key_openrouter`
+- `model_chat_openrouter`
+- `model_embending_openrouter`
+- `api_url_openrouter`
+- `api_url_openrouter_embeddings`
+
+### 2) Storage mode
+
+Use one mode at a time.
+
+**Pinecone mode** (enabled when `pinecore_api_key` is set):
+
+- `pinecore_api_key`
+- `pinecore_indexName`
+- `pinecore_cloud`
+- `pinecore_region`
+- `pinecore_embedModel`
+
+**Local mode** (used when Pinecone key is empty):
+
+- `local_mysql_dsn`
+- `local_mysql_table`
+- `local_db_path`
+- `local_vector_dimension`
+
+### 3) Service
+
+- `api_host`
+- `api_port`
+
+### 4) Memory & prompts
+
+- `promt_system_chat`
+- `promt_memory_summary`
+- `memory_summary_user_promt`
+- `context_limit`
+- `context_saved_for_response`
+- `summary_memory_step`
+- `short_memory_messages_count`
+- `context_coeff`
+- `context_coeff_count`
+- `system_memory_percent`
+- `user_profile_percent`
+- `tools_memory_percent`
+- `long_term_percent`
+- `short_term_percent`
+- `system_prompt_percent`
+
+---
+
+## Quick Start
+
+### Local MySQL bootstrap
 
 ```bash
 mysql -u root -p < scripts/mysql_bootstrap.sql
 ```
 
-Then set `local_mysql_dsn` in `settings.json` (or `LOCAL_MYSQL_DSN`) to the created user, for example:
-`assistant_app:change_me_strong_password@tcp(127.0.0.1:3306)/assistant?parseTime=true`.
+Set `local_mysql_dsn` in `settings.json` or `LOCAL_MYSQL_DSN`.
 
-### Start service
+### Run service
 
 ```bash
 go run ./cmd
 ```
 
-Service starts at `http://<api_host>:<api_port>`.
+Server listens at: `http://<api_host>:<api_port>`
 
-## API
+---
 
-### `POST /chat`
+## API Surface
 
-Request body:
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/chat` | `POST` | Main chat request |
+| `/memory` | `POST` | Dump current in-memory state |
+| `/msg` | `POST` | Dump generated context messages |
+
+### `POST /chat` example
 
 ```json
 {
-  "message": "create project TEST in Jira"
+  "message": "hello"
 }
 ```
 
-Example:
+Status codes:
 
-```bash
-curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d "{\"message\":\"show Jira projects\"}"
-```
+- `200` success
+- `400` invalid request
+- `500` internal error
+- `501` model returned `tool_calls` not implemented in chat flow
 
-Responses:
+---
 
-- `200` - OpenRouter response JSON
-- `400` - invalid request body
-- `500` - internal processing error (AI/Jira/tool pipeline)
+## Production Checklist
 
-### `GET /memory`
+- [ ] Add authentication/authorization in front of API
+- [ ] Restrict or disable `/memory` and `/msg` in prod
+- [ ] Store secrets via environment/secret manager (not in `settings.json`)
+- [ ] Add request rate limiting and body size limits
+- [ ] Add health endpoint and readiness checks
+- [ ] Configure centralized logs and alerting
+- [ ] Add integration tests for full `/chat` flow
+- [ ] Define backup/retention policy for long-term storage
 
-Returns current in-memory chat history.
+---
 
-```bash
-curl http://localhost:8080/memory
-```
+## Operational Notes
 
-## Logging
+- HTTP server has read/write/idle timeouts configured.
+- Graceful shutdown stops queue workers and closes local DB connections.
+- Summarization commit is protected from dropping short-term messages on failed summarization.
 
-Custom logger levels:
+---
 
-- `QUESTION` - incoming user question
-- `TASK` - intermediate tool steps
-- `ANSWER` - final model answer
-- `ERROR` - processing/integration errors
-- `INFO` - service lifecycle and state logs
+## Security Notes
 
-## Limitations
+- `settings.json` is plaintext.
+- Do not commit real API keys/tokens.
+- Protect `/memory` and `/msg` in production.
 
-- Memory is process-local (RAM only)
-- No persistent storage for chat history
-- No built-in authentication for HTTP endpoints
-- Long-memory/embeddings flow is not fully finished yet
+---
+
+## Known Limits
+
+- No built-in HTTP auth.
+- Short-term memory is process-local.
+- `/memory` and `/msg` are diagnostics-oriented endpoints.

@@ -276,6 +276,42 @@ func TestSummaryShortMemory_TriggersWhenMessageCountAboveThreshold(t *testing.T)
 	}
 }
 
+func TestSummaryShortMemory_DoesNotDropMessagesOnEnqueueError(t *testing.T) {
+	m := newTestMemory()
+	m.Cfg.ShortMemoryMessagesCount = 2
+	m.Cfg.SummaryMemoryStep = 1
+	m.Tokens.MessageCount = 4
+	m.ShortTerm = []History{
+		{Question: ShotTermQuestion{Text: "q1"}, Answer: ShotTermAnswer{Text: "a1"}},
+		{Question: ShotTermQuestion{Text: "q2"}, Answer: ShotTermAnswer{Text: "a2"}},
+	}
+
+	oldEnqueue := enqueueSummaryFn
+	oldDetect := detectChosenToolFn
+	t.Cleanup(func() {
+		enqueueSummaryFn = oldEnqueue
+		detectChosenToolFn = oldDetect
+	})
+
+	enqueueSummaryFn = func(_ *llmcalls.Queue, _ llmcalls.QueueItem) (models.ResponseBody, error) {
+		return models.ResponseBody{}, errors.New("queue failed")
+	}
+	detectChosenToolFn = func(_ *toolsmemory.Tool, _ models.ResponseBody) error {
+		return nil
+	}
+
+	err := m.SummaryShortMemory(nil, "test-model")
+	if err == nil {
+		t.Fatalf("expected SummaryShortMemory error")
+	}
+	if m.Tokens.MessageCount != 4 {
+		t.Fatalf("message count should stay unchanged on error: got=%d want=%d", m.Tokens.MessageCount, 4)
+	}
+	if len(m.ShortTerm) != 2 {
+		t.Fatalf("short memory should stay unchanged on error: got=%d want=%d", len(m.ShortTerm), 2)
+	}
+}
+
 func TestSummaryShortMemory_UsesConfigPrompt(t *testing.T) {
 	m := newTestMemory()
 	m.Cfg.ShortMemoryMessagesCount = 1

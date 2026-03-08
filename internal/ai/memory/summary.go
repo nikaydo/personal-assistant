@@ -18,12 +18,11 @@ var detectChosenToolFn = func(t *tools.Tool, body models.ResponseBody) error {
 
 func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	targetCount := m.Cfg.ShortMemoryMessagesCount
 	thresholdCount := m.Cfg.ShortMemoryMessagesCount + m.Cfg.SummaryMemoryStep
 
 	if m.Tokens.MessageCount < thresholdCount {
+		m.mu.Unlock()
 		return nil
 	}
 
@@ -33,18 +32,24 @@ func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
 	}
 
 	msg := []models.Message{{Role: "system", Content: systemPrompt}}
-	for m.Tokens.MessageCount > targetCount && len(m.ShortTerm) > 0 {
+	tempCount := m.Tokens.MessageCount
+	consumeCount := 0
+	consumeSnapshot := make([]History, 0, len(m.ShortTerm))
+	for tempCount > targetCount && consumeCount < len(m.ShortTerm) {
+		h := m.ShortTerm[consumeCount]
 		msg = append(msg,
 			models.Message{
 				Role:    "user",
-				Content: m.ShortTerm[0].Question.Text,
+				Content: h.Question.Text,
 			}, models.Message{
 				Role:    "assistant",
-				Content: m.ShortTerm[0].Answer.Text,
+				Content: h.Answer.Text,
 			})
-		m.ShortTerm = m.ShortTerm[1:]
-		m.Tokens.MessageCount--
+		consumeSnapshot = append(consumeSnapshot, h)
+		consumeCount++
+		tempCount--
 	}
+	m.mu.Unlock()
 
 	respLLM, err := enqueueSummaryFn(Queue, llmcalls.QueueItem{Body: models.RequestBody{
 		Model:       model,
@@ -59,6 +64,24 @@ func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
 		return err
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	commitCount := countMatchingHistoryPrefix(m.ShortTerm, consumeSnapshot)
+	if commitCount > 0 {
+		m.ShortTerm = m.ShortTerm[commitCount:]
+		m.Tokens.MessageCount = max(m.Tokens.MessageCount-commitCount, 0)
+	}
+
 	m.Logger.Memory("SummaryShortMemory: summarized short-term memory and updated long-term memory")
 	return nil
+}
+
+func countMatchingHistoryPrefix(current, snapshot []History) int {
+	maxCount := min(len(current), len(snapshot))
+	for i := 0; i < maxCount; i++ {
+		if current[i] != snapshot[i] {
+			return i
+		}
+	}
+	return maxCount
 }

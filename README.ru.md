@@ -1,155 +1,225 @@
-﻿# Personal assistant
+# Personal Assistant
 
-Personal assistant - локальный Go-сервис, который принимает сообщения, отправляет их в OpenRouter и при необходимости выполняет действия в Jira через tool calls.
+![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)
+![API](https://img.shields.io/badge/API-HTTP%20JSON-2D7FF9)
+![Storage](https://img.shields.io/badge/Storage-Local%20%7C%20Pinecone-4C9A2A)
+![Memory](https://img.shields.io/badge/Memory-Short%20%2B%20Long-F59E0B)
+![Status](https://img.shields.io/badge/Status-Active-22C55E)
+
+> Локальный Go-сервис для чата через OpenRouter с многоуровневой памятью (short-term + long-term) и переключаемым векторным хранилищем.
 
 [English version](README.md)
 
-## Возможности
+---
 
-- endpoint `POST /chat` для сообщений пользователя
-- маршрутизация инструментов из ответа LLM
-- выполнение Jira-функций:
-  - `create_project`
-  - `search_projects`
-  - `delete_project`
-- хранение истории диалога в памяти процесса
-- endpoint `GET /memory` для просмотра текущей истории
+## Зачем этот проект
 
-## Принцип работы
+Это не просто прокси к LLM. На каждый запрос сервис собирает контекст из нескольких слоев:
 
-1. Клиент отправляет JSON в `POST /chat`.
-2. Сервис собирает контекст:
-   - системный промпт
-   - история сообщений
-   - новое сообщение пользователя
-3. OpenRouter возвращает обычный ответ или `tool_calls`.
-4. Если пришел tool call, сервис:
-   - парсит аргументы
-   - вызывает Jira API
-   - отправляет результат инструмента обратно в модель (`role=tool`) и получает финальный ответ
-5. Возвращает клиенту JSON-ответ.
+- бюджет системного промпта
+- недавние сообщения (short-term memory)
+- релевантные long-term summary из векторного поиска
+
+Итог: более устойчивые ответы и предсказуемый контроль токенов.
+
+---
+
+## Кратко
+
+| Область | Что делает |
+|---|---|
+| API | `POST /chat`, `POST /memory`, `POST /msg` |
+| LLM | OpenRouter chat + embeddings |
+| Память | short-term в процессе + long-term summary в БД |
+| Режимы хранения | Local (`HNSW + MySQL`) или Pinecone |
+| Runtime | Очередь запросов, graceful shutdown, HTTP timeouts |
+
+---
+
+## Матрица готовности модулей
+
+| Модуль | Статус | Комментарий |
+|---|---|---|
+| `internal/api` | Stable | Основные endpoint’ы и хендлеры готовы |
+| `internal/llmCalls` | Stable | Очередь и слой запросов покрыты тестами |
+| `internal/ai/memory` | Stable | Сборка контекста + безопасный commit суммаризации |
+| `internal/database/localCombinedDB` | Stable | Комбинация HNSW + MySQL |
+| `internal/database/pinecone` | Beta | Работает при конфиге, но покрытие ниже local mode |
+| Tool calls в `/chat` flow | Limited | При `tool_calls` возвращается `501` |
+| AuthN/AuthZ | Missing | Нужно добавить перед production-expose |
+
+Легенда: `Stable` = подходит для регулярного использования, `Beta` = можно использовать с оговорками, `Limited` = намеренно неполная реализация.
+
+---
+
+## Поток запроса
+
+```mermaid
+flowchart TD
+    A[Клиент: POST /chat] --> B[Сборка контекста]
+    B --> B1[Системный промпт]
+    B --> B2[Short-term история]
+    B --> B3[Long-term retrieval]
+    B3 --> E1[Создание embedding]
+    E1 --> E2[Векторный поиск]
+    B --> C[OpenRouter chat completion]
+    C --> D[Ответ клиенту]
+    D --> F[Сохранение в short-term]
+    F --> G{Порог достигнут?}
+    G -->|Нет| H[Готово]
+    G -->|Да| I[Суммаризация старых сообщений tool-call]
+    I --> J[Сохранение summary в long-term БД]
+    J --> H
+```
+
+---
 
 ## Структура проекта
 
-- `cmd/main.go` - точка входа
-- `internal/config` - чтение `settings.json`
-- `internal/api` - HTTP-роуты и обработчики
-- `internal/ai` - запросы в OpenRouter, tool routing, память
-- `internal/jira` - обертка над Jira API
-- `internal/logg` - кастомный логгер (`slog` + цветные уровни)
-- `internal/models` - DTO, разделенные по доменам:
-  - `internal/models/chat`
-  - `internal/models/tool`
-  - `internal/models/openrouter`
-  - `internal/models/jira`
+```text
+cmd/main.go                          # entrypoint, запуск, shutdown
+internal/api                         # HTTP-роуты и хендлеры
+internal/ai                          # orchestration памяти и модели
+internal/llmCalls                    # вызовы OpenRouter + очередь
+internal/database                    # абстракция БД (local / pinecone)
+internal/database/localCombinedDB    # реализация HNSW + MySQL
+internal/config                      # settings + env overrides
+internal/models                      # DTO
+internal/logg                        # структурный логгер
+```
 
-## Конфиг (`settings.json`)
+---
 
-### Основные поля
+## Конфигурация
 
-- `api_key_openrouter` - API ключ OpenRouter. Получить можно здесь: <https://openrouter.ai/settings/keys>
-- `model_chat_openrouter` - список чат-моделей. Первая модель основная, остальные используются как fallback.
-- `model_embending_openrouter` - embedding-модель для будущей логики long-memory/embeddings.
-- `api_url_openrouter` - URL chat completions OpenRouter (обычно `https://openrouter.ai/api/v1/chat/completions`).
+### 1) OpenRouter
 
-### Jira поля
+- `api_key_openrouter`
+- `model_chat_openrouter`
+- `model_embending_openrouter`
+- `api_url_openrouter`
+- `api_url_openrouter_embeddings`
 
-- `jira_api_key` - API токен Atlassian. Получить можно здесь: <https://id.atlassian.com/manage-profile/security/api-tokens>
-- `jira_email` - email вашего Atlassian аккаунта.
-- `jira_personal_url` - базовый URL Jira в формате `https://<ваш-тег>.atlassian.net`.
+### 2) Режим хранения
 
-### Поля сервиса
+Используется один режим за раз.
 
-- `api_host` - хост, на котором поднимается HTTP API (обычно `localhost`).
-- `api_port` - порт HTTP API (обычно `8080`).
+**Pinecone режим** (если задан `pinecore_api_key`):
 
-### Поля промптов
+- `pinecore_api_key`
+- `pinecore_indexName`
+- `pinecore_cloud`
+- `pinecore_region`
+- `pinecore_embedModel`
 
-- `promt_system_chat` - основной системный промпт ассистента.
-- `promt_memory_summary` - системный промпт для суммаризации истории.
-- `memory_summary_user_promt` - пользовательское сообщение для запуска суммаризации.
+**Local режим** (если ключ Pinecone пуст):
 
-### Поля управления контекстом
+- `local_mysql_dsn`
+- `local_mysql_table`
+- `local_db_path`
+- `local_vector_dimension`
 
-- `max_tokens_context` - жесткий лимит контекста в токенах.
-  - `0` включает авто-режим: лимит рассчитывается по выбранным моделям.
-- `high_border_max_context` - запас от верхней границы контекста.
-  - пример: при `32000` и запасе `5000` рабочий лимит будет `27000`.
-- `summary_memory_step` - порог для шага суммаризации памяти.
-- `division_coefficient` - коэффициент деления доступного контекста между зонами памяти.
+### 3) Сервис
 
-### Важно по безопасности
+- `api_host`
+- `api_port`
 
-`settings.json` хранится в открытом виде. Не коммитьте реальные ключи и токены в репозиторий. Лучше хранить секреты в переменных окружения или локальном файле, который игнорируется git.
+### 4) Память и промпты
 
-## Запуск
+- `promt_system_chat`
+- `promt_memory_summary`
+- `memory_summary_user_promt`
+- `context_limit`
+- `context_saved_for_response`
+- `summary_memory_step`
+- `short_memory_messages_count`
+- `context_coeff`
+- `context_coeff_count`
+- `system_memory_percent`
+- `user_profile_percent`
+- `tools_memory_percent`
+- `long_term_percent`
+- `short_term_percent`
+- `system_prompt_percent`
 
-### Подготовка MySQL (локальный режим)
+---
 
-Перед первым запуском в режиме local DB создайте БД и пользователя:
+## Быстрый старт
+
+### Подготовка MySQL (local mode)
 
 ```bash
 mysql -u root -p < scripts/mysql_bootstrap.sql
 ```
 
-После этого укажите `local_mysql_dsn` в `settings.json` (или `LOCAL_MYSQL_DSN`) для созданного пользователя, например:
-`assistant_app:change_me_strong_password@tcp(127.0.0.1:3306)/assistant?parseTime=true`.
+Укажи `local_mysql_dsn` в `settings.json` или `LOCAL_MYSQL_DSN`.
 
-### Старт сервиса
+### Запуск
 
 ```bash
 go run ./cmd
 ```
 
-Сервис поднимается на `http://<api_host>:<api_port>`.
+Сервис слушает: `http://<api_host>:<api_port>`
+
+---
 
 ## API
 
-### `POST /chat`
+| Endpoint | Метод | Назначение |
+|---|---|---|
+| `/chat` | `POST` | Основной чат-запрос |
+| `/memory` | `POST` | Снимок текущего in-memory состояния |
+| `/msg` | `POST` | Список сообщений контекста для диагностики |
 
-Тело запроса:
+### Пример `POST /chat`
 
 ```json
 {
-  "message": "создай проект TEST в Jira"
+  "message": "привет"
 }
 ```
 
-Пример:
+Коды ответа:
 
-```bash
-curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d "{\"message\":\"покажи проекты Jira\"}"
-```
+- `200` успех
+- `400` невалидный запрос
+- `500` внутренняя ошибка
+- `501` модель вернула `tool_calls`, не реализованные в chat flow
 
-Ответы:
+---
 
-- `200` - JSON от OpenRouter
-- `400` - невалидный запрос
-- `500` - ошибка обработки (AI/Jira/tool pipeline)
+## Production Checklist
 
-### `GET /memory`
+- [ ] Добавить аутентификацию/авторизацию перед API
+- [ ] Ограничить или отключить `/memory` и `/msg` в production
+- [ ] Хранить секреты через env/secret manager, не в `settings.json`
+- [ ] Добавить rate limiting и лимит размера body
+- [ ] Добавить health/readiness endpoint’ы
+- [ ] Настроить централизованный сбор логов и алерты
+- [ ] Добавить интеграционные тесты полного `/chat` pipeline
+- [ ] Определить backup/retention политику для long-term хранилища
 
-Возвращает текущую историю диалога из памяти.
+---
 
-```bash
-curl http://localhost:8080/memory
-```
+## Эксплуатационные заметки
 
-## Логи
+- HTTP сервер работает с read/write/idle timeout.
+- Graceful shutdown останавливает очередь и закрывает локальные соединения БД.
+- Логика суммаризации не теряет short-term сообщения при ошибке суммаризации.
 
-Используются уровни:
+---
 
-- `QUESTION` - входящий вопрос
-- `TASK` - промежуточные шаги инструментов
-- `ANSWER` - финальный ответ модели
-- `ERROR` - ошибки обработки и интеграций
-- `INFO` - служебные логи сервиса
+## Безопасность
+
+- `settings.json` хранится в открытом виде.
+- Не коммить реальные ключи и токены.
+- В production обязательно ограничь доступ к `/memory` и `/msg`.
+
+---
 
 ## Ограничения
 
-- память только в RAM процесса
-- нет персистентного хранения истории
-- нет встроенной авторизации HTTP-эндпоинтов
-- long-memory/embeddings пока не доведены до конца
+- Нет встроенной HTTP-аутентификации.
+- Short-term память хранится только в процессе.
+- `/memory` и `/msg` ориентированы на диагностику.

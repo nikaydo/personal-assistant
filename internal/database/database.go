@@ -23,6 +23,7 @@ type Database struct {
 
 	P     Pinecone
 	Local LocalDbase
+	sqlDB *sql.DB
 }
 
 var (
@@ -83,6 +84,7 @@ func InitDB(cfg *config.Config) (*Database, error) {
 	return &Database{
 		Secelted: 2,
 		Local:    *local,
+		sqlDB:    sqlDB,
 	}, nil
 }
 
@@ -215,4 +217,11 @@ func (db *Database) UpsertPineconeRecords(records []*pinecone.IntegratedRecord) 
 	default:
 		return ErrUnknownDBSelection
 	}
+}
+
+func (db *Database) Close() error {
+	if db == nil || db.sqlDB == nil {
+		return nil
+	}
+	return db.sqlDB.Close()
 }

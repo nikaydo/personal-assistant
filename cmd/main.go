@@ -1,7 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/nikaydo/personal-assistant/internal/api"
 	"github.com/nikaydo/personal-assistant/internal/config"
@@ -43,9 +49,32 @@ func main() {
 	apiLog.Info("Routes setup")
 	systemLog.Info(fmt.Sprintf("Server starting on addr %s:%d", config.ApiHost, config.ApiPort))
 	systemLog.Info("Ready")
-	err = api.Start()
-	if err != nil {
-		systemLog.Error("Server start failed:", err)
+
+	startErrCh := make(chan error, 1)
+	go func() {
+		startErrCh <- api.Start()
+	}()
+
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case err = <-startErrCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			systemLog.Error("Server start failed:", err)
+		}
 		return
+	case <-sigCtx.Done():
+	}
+
+	systemLog.Info("Shutdown requested, stopping services")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := api.Shutdown(shutdownCtx); err != nil {
+		systemLog.Error("Shutdown failed:", err)
+	}
+
+	if err = <-startErrCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		systemLog.Error("Server stopped with error:", err)
 	}
 }

@@ -82,6 +82,8 @@ func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmc
 }
 
 func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
+	longTermContent, longTermMsgTokens, longTermSymbols := m.prepareLongTermMemoryMessage(q)
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	messages := []models.Message{}
@@ -96,7 +98,14 @@ func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
 	//добавляем в историю сообщения из истории выполнения функций
 	messages = m.ToolsMemoryFill(messages)
 	//добавляем в историю сообщения из долгосрочной памяти
-	messages = m.LongTermMemoryFill(q, messages, longTermTokens)
+	if longTermContent != "" {
+		messages = append(messages, models.Message{
+			Role:    "system",
+			Content: longTermContent,
+		})
+		*longTermTokens = longTermMsgTokens
+		m.Tokens.CountSymbolsInContext += longTermSymbols
+	}
 	//добавляем в историю сообщения из краткосрочной памяти
 	messages = m.ShortMemoryFill(messages, shortTermTokens)
 	var questionTokens int
@@ -120,6 +129,43 @@ func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
 	)
 	m.Logger.Info("Memory with history", "messages_count", len(messages))
 	return messages
+}
+
+func (m *Memory) prepareLongTermMemoryMessage(question string) (string, int, int) {
+	if m.Tokens.LongTermLimit == 0 {
+		m.Logger.Memory("LongTermMemoryFill: long-term memory is disabled, skipping long-term memory in context")
+		return "", 0, 0
+	}
+	if question == "" {
+		m.Logger.Memory("LongTermMemoryFill: question is empty, skipping long-term memory in context")
+		return "", 0, 0
+	}
+	if m.DBase == nil {
+		m.Logger.Memory("LongTermMemoryFill: database is nil, skipping long-term memory in context")
+		return "", 0, 0
+	}
+
+	emb, err := createEmbeddingFn(question, m.Cfg)
+	if err != nil {
+		m.Logger.Error("LongTermMemoryFill: failed to create embedding, skipping long-term memory:", err)
+		return "", 0, 0
+	}
+	if len(emb.Data) == 0 || len(emb.Data[0].Embedding) == 0 {
+		m.Logger.Memory("LongTermMemoryFill: embedding response is empty, skipping long-term memory in context")
+		return "", 0, 0
+	}
+
+	summaries, err := searchByVectorFn(m.DBase, emb.Data[0].Embedding, longTermTopK)
+	if err != nil {
+		m.Logger.Error("LongTermMemoryFill: failed to search long-term memory, skipping long-term memory:", err)
+		return "", 0, 0
+	}
+	content, tokens, symbols := m.buildLongTermBlock(summaries)
+	if content == "" {
+		m.Logger.Memory("LongTermMemoryFill: no long-term memory matched context limits")
+		return "", 0, 0
+	}
+	return content, tokens, symbols
 }
 
 func (m *Memory) SystemPromptFill(systemPrompt string, msg []models.Message, systemPromptTokens *int) []models.Message {
