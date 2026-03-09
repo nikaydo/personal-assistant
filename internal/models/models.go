@@ -3,6 +3,7 @@ package models
 import (
 	apimodels "github.com/nikaydo/personal-assistant/internal/models/api"
 	chatmodels "github.com/nikaydo/personal-assistant/internal/models/chat"
+	memorymodels "github.com/nikaydo/personal-assistant/internal/models/memory"
 	openroutermodels "github.com/nikaydo/personal-assistant/internal/models/openrouter"
 	toolmodels "github.com/nikaydo/personal-assistant/internal/models/tool"
 )
@@ -38,6 +39,13 @@ type CostDetails = openroutermodels.CostDetails
 type CompletionTokensDetails = openroutermodels.CompletionTokensDetails
 
 type Query = apimodels.Query
+
+type ShotTermAnswer = memorymodels.ShotTermAnswer
+type ShotTermQuestion = memorymodels.ShotTermQuestion
+type History = memorymodels.History
+type SystemSettings = memorymodels.SystemSettings
+type ToolsHistory = memorymodels.ToolsHistory
+
 
 func ExtractJSON(s string) (string, error) {
 	return openroutermodels.ExtractJSON(s)

@@ -34,12 +34,14 @@ func Init(config config.Config, aiLog *logg.Logger, db *database.Database) *Ai {
 	queueLog := aiLog.WithModule("QUEUE")
 	queue := llmcalls.NewQueue(config, 64, queueLog)
 	queue.QueueStart()
-	tools := tools.Tool{Dbase: db, Cfg: config}
+	tools := tools.Tool{Dbase: db, Cfg: config, Queue: queue, Model: config.ModelOpenRouter[0]}
 	mem := &memory.Memory{
-		DBase:  db,
-		Cfg:    config,
-		Logger: aiLog,
-		Tools:  tools,
+		DBase:        db,
+		Cfg:          config,
+		Logger:       aiLog,
+		Tools:        tools,
+		SystemMemory: &models.SystemSettings{},
+		ToolsMemory:  &[]models.ToolsHistory{},
 		Tokens: memory.ContextTokens{
 			ContextCoeff:      []float32{config.ContextCoeff},
 			ContextCoeffCount: config.ContextCoeffCount,

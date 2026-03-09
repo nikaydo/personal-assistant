@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
 const (
@@ -15,14 +17,14 @@ const (
 )
 
 type State struct {
-	Version      string    `json:"version"`
-	UpdatedAt    string    `json:"updated_at"`
-	SystemMemory string    `json:"system_memory"`
-	UserProfile  []History `json:"user_profile"`
-	ToolsMemory  []History `json:"tools_memory"`
-	ShortTerm    []History `json:"short_term"`
-	MessageCount int       `json:"message_count"`
-	ContextCoeff []float32 `json:"context_coeff"`
+	Version      string                `json:"version"`
+	UpdatedAt    string                `json:"updated_at"`
+	SystemMemory models.SystemSettings `json:"system_memory"`
+	UserProfile  []models.History      `json:"user_profile"`
+	ToolsMemory  []models.ToolsHistory `json:"tools_memory"`
+	ShortTerm    []models.History      `json:"short_term"`
+	MessageCount int                   `json:"message_count"`
+	ContextCoeff []float32             `json:"context_coeff"`
 }
 
 func (m *Memory) resolveStatePath(path string) string {
@@ -42,10 +44,9 @@ func (m *Memory) snapshotState() State {
 	state := State{
 		Version:      stateVersion,
 		UpdatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-		SystemMemory: m.SystemMemory,
-		UserProfile:  append([]History(nil), m.UserProfile...),
-		ToolsMemory:  append([]History(nil), m.ToolsMemory...),
-		ShortTerm:    append([]History(nil), m.ShortTerm...),
+		SystemMemory: *m.SystemMemory,
+		ToolsMemory:  append([]models.ToolsHistory(nil), *m.ToolsMemory...),
+		ShortTerm:    append([]models.History(nil), m.ShortTerm...),
 		MessageCount: m.Tokens.MessageCount,
 		ContextCoeff: m.Tokens.ContextCoeffSnapshot(),
 	}
@@ -55,11 +56,9 @@ func (m *Memory) snapshotState() State {
 func (m *Memory) applyState(state State) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	m.SystemMemory = state.SystemMemory
-	m.UserProfile = append([]History(nil), state.UserProfile...)
-	m.ToolsMemory = append([]History(nil), state.ToolsMemory...)
-	m.ShortTerm = append([]History(nil), state.ShortTerm...)
+	*m.SystemMemory = state.SystemMemory
+	*m.ToolsMemory = append([]models.ToolsHistory(nil), state.ToolsMemory...)
+	m.ShortTerm = append([]models.History(nil), state.ShortTerm...)
 	m.Tokens.MessageCount = max(state.MessageCount, 0)
 	if len(state.ContextCoeff) > 0 {
 		m.Tokens.SetContextCoeffSnapshot(state.ContextCoeff)

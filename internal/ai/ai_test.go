@@ -135,10 +135,10 @@ func TestInit_LoadsMemoryStateFromFile(t *testing.T) {
 			ContextCoeffCount: 12,
 		},
 	}
-	seed.ShortTerm = []memory.History{
+	seed.ShortTerm = []models.History{
 		{
-			Question: memory.ShotTermQuestion{Text: "q1"},
-			Answer:   memory.ShotTermAnswer{Text: "a1"},
+			Question: models.ShotTermQuestion{Text: "q1"},
+			Answer:   models.ShotTermAnswer{Text: "a1"},
 		},
 	}
 	seed.Tokens.MessageCount = 1

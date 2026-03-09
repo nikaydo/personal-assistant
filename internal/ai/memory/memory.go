@@ -1,7 +1,9 @@
 package memory
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -30,13 +32,13 @@ var searchByVectorFn = func(db *database.Database, vector []float32, topK int) (
 
 type Memory struct {
 	//системная память
-	SystemMemory string
+	SystemMemory *models.SystemSettings
 	//информация о пользователе
-	UserProfile []History
-	//tools memory - информация о доступных инструментах и их состоянии
-	ToolsMemory []History
+	UserProfile []models.Message
+	//tools memory - информация вызванных функциях
+	ToolsMemory *[]models.ToolsHistory
 	//краткосрочная память
-	ShortTerm []History
+	ShortTerm []models.History
 
 	Tools tools.Tool
 
@@ -48,23 +50,6 @@ type Memory struct {
 	Cfg    config.Config
 
 	mu sync.RWMutex
-}
-
-type History struct {
-	Question ShotTermQuestion `json:"question"`
-	Answer   ShotTermAnswer   `json:"answer"`
-	Model    string           `json:"model"`
-	Id       string           `json:"id"`
-	Created  int64            `json:"created"`
-}
-
-type ShotTermQuestion struct {
-	Text string
-}
-
-type ShotTermAnswer struct {
-	Text  string
-	Usage models.Usage
 }
 
 func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmcalls.Queue, model string) {
@@ -93,15 +78,13 @@ func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
 	defer m.mu.Unlock()
 	messages := []models.Message{}
 	m.Tokens.CountSymbolsInContext = 0
-	var systemPromptTokens, longTermTokens, shortTermTokens *int = new(int), new(int), new(int)
-	//добавляем в историю системный промт
+	var systemPromptTokens, longTermTokens, shortTermTokens, toolsmemoryTokens *int = new(int), new(int), new(int), new(int)
+	//добавляем в историю системный промт и персоанализацию
 	messages = m.SystemPromptFill(systemPrompt, messages, systemPromptTokens)
-	//добавляем в историю сообщения из системной памяти
-	messages = m.SystemMemoryFill(messages)
 	//добавляем в историю сообщения из информации о пользователе
 	messages = m.UserProfileFill(messages)
 	//добавляем в историю сообщения из истории выполнения функций
-	messages = m.ToolsMemoryFill(messages)
+	messages = m.ToolsMemoryFill(messages, toolsmemoryTokens)
 	//добавляем в историю сообщения из долгосрочной памяти
 	if longTermContent != "" {
 		messages = append(messages, models.Message{
@@ -128,7 +111,8 @@ func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
 		"long_term_tokens", *longTermTokens,
 		"short_term_tokens", *shortTermTokens,
 		"question_tokens", questionTokens,
-		"total_context_tokens", *systemPromptTokens+*longTermTokens+*shortTermTokens+questionTokens,
+		"tools_memory_Tokens", toolsmemoryTokens,
+		"total_context_tokens", *systemPromptTokens+*longTermTokens+*shortTermTokens+questionTokens+*toolsmemoryTokens,
 		"context_limit", m.Tokens.ContextLimit,
 		"context_coeff", m.Tokens.ContextCoeffSnapshot(),
 	)
@@ -186,20 +170,43 @@ func (m *Memory) SystemPromptFill(systemPrompt string, msg []models.Message, sys
 		m.Logger.Memory("SystemMemoryFill: system prompt exceeds system prompt percent, skipping system prompt in context", "system_prompt_length", len(systemPrompt), "system_prompt_percent", m.Tokens.SystemPromptPercent, "context_coeff", m.Tokens.GetContextCoeff())
 		return msg
 	}
+	pref := m.SystemMemoryFill()
+
+	m.Tokens.CountSymbolsInContext += len(systemPrompt) + len(pref)
+	*systemPromptTokens = int(float32(len(systemPrompt)) / m.Tokens.GetContextCoeff())
+
 	msg = append(msg, models.Message{
 		Role:    "system",
-		Content: systemPrompt,
+		Content: systemPrompt + pref,
 	})
-	m.Tokens.CountSymbolsInContext += len(systemPrompt)
-	*systemPromptTokens = int(float32(len(systemPrompt)) / m.Tokens.GetContextCoeff())
-	return msg
-}
-
-func (m *Memory) SystemMemoryFill(msg []models.Message) []models.Message {
 
 	return msg
 }
 
+func (m *Memory) SystemMemoryFill() string {
+	if m.Tokens.SystemMemoryLimit == 0 {
+		m.Logger.Memory("ToolsMemoryFill: tools memory is disabled, skipping tools memory in context")
+		return ""
+	}
+
+	var str strings.Builder
+	str.WriteString("")
+	startStr := "\nPersoanalization settings: "
+	args := reflect.ValueOf(m.SystemMemory).Elem()
+	t := args.Type()
+
+	for i := 0; i < args.NumField(); i++ {
+		srcField := args.Field(i)
+
+		if srcField.Kind() == reflect.String && srcField.String() != "" {
+			fmt.Fprintf(&str, "%s: %s. ", t.Field(i).Name, srcField.String())
+		}
+	}
+	if str.Len() == 0 {
+		return ""
+	}
+	return startStr + str.String()
+}
 func (m *Memory) UserProfileFill(msg []models.Message) []models.Message {
 	if m.Tokens.UserProfileLimit == 0 {
 		m.Logger.Memory("UserProfileFill: user profile memory is disabled, skipping user profile in context")
@@ -208,10 +215,24 @@ func (m *Memory) UserProfileFill(msg []models.Message) []models.Message {
 	return msg
 }
 
-func (m *Memory) ToolsMemoryFill(msg []models.Message) []models.Message {
+func (m *Memory) ToolsMemoryFill(msg []models.Message, toolmemeoryTokens *int) []models.Message {
 	if m.Tokens.ToolsMemoryLimit == 0 {
 		m.Logger.Memory("ToolsMemoryFill: tools memory is disabled, skipping tools memory in context")
 		return msg
+	}
+	for _, i := range *m.ToolsMemory {
+		data, _ := json.Marshal(i)
+		*toolmemeoryTokens += int(float32(len(data)) / m.Tokens.GetContextCoeff())
+		msg = append(msg, models.Message{
+			Role:      i.Role,
+			Type:      i.Type,
+			ID:        i.Id,
+			CallId:    i.CallId,
+			Name:      i.Name,
+			Arguments: i.Arguments,
+			Output:    i.Output,
+			Content:   i.Content,
+		})
 	}
 	return msg
 }
@@ -354,9 +375,9 @@ func (m *Memory) ShortMemoryFill(msg []models.Message, ShortTermTokens *int) []m
 func (m *Memory) FillShortMemory(question string, answer models.ResponseBody) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.ShortTerm = append(m.ShortTerm, History{
-		Question: ShotTermQuestion{Text: question},
-		Answer:   ShotTermAnswer{Text: answer.Choices[0].Message.Content, Usage: answer.Usage},
+	m.ShortTerm = append(m.ShortTerm, models.History{
+		Question: models.ShotTermQuestion{Text: question},
+		Answer:   models.ShotTermAnswer{Text: answer.Choices[0].Message.Content, Usage: answer.Usage},
 		Model:    answer.Model,
 		Id:       answer.ID,
 		Created:  answer.Created,

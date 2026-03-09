@@ -13,7 +13,8 @@ var enqueueSummaryFn = func(q *llmcalls.Queue, item llmcalls.QueueItem) (models.
 }
 
 var detectChosenToolFn = func(t *tools.Tool, body models.ResponseBody) error {
-	return t.DetectChosenTool(body)
+	_, err := t.DetectChosenTool(body, nil, nil, []models.Message{})
+	return err
 }
 
 func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
@@ -34,7 +35,7 @@ func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
 	msg := []models.Message{{Role: "system", Content: systemPrompt}}
 	tempCount := m.Tokens.MessageCount
 	consumeCount := 0
-	consumeSnapshot := make([]History, 0, len(m.ShortTerm))
+	consumeSnapshot := make([]models.History, 0, len(m.ShortTerm))
 	for tempCount > targetCount && consumeCount < len(m.ShortTerm) {
 		h := m.ShortTerm[consumeCount]
 		msg = append(msg,
@@ -76,7 +77,7 @@ func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
 	return nil
 }
 
-func countMatchingHistoryPrefix(current, snapshot []History) int {
+func countMatchingHistoryPrefix(current, snapshot []models.History) int {
 	maxCount := min(len(current), len(snapshot))
 	for i := 0; i < maxCount; i++ {
 		if current[i] != snapshot[i] {

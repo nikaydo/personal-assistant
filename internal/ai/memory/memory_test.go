@@ -123,10 +123,10 @@ func TestMessageWithHistory_LongTermBlockInjectedInOrder(t *testing.T) {
 	m.Tokens.LongTermLimit = 10_000
 	m.Tokens.ShortTermLimit = 10_000
 	m.DBase = &database.Database{}
-	m.ShortTerm = []History{
+	m.ShortTerm = []models.History{
 		{
-			Question: ShotTermQuestion{Text: "old-q"},
-			Answer:   ShotTermAnswer{Text: "old-a"},
+			Question: models.ShotTermQuestion{Text: "old-q"},
+			Answer:   models.ShotTermAnswer{Text: "old-a"},
 		},
 	}
 
@@ -244,9 +244,9 @@ func TestSummaryShortMemory_TriggersWhenMessageCountAboveThreshold(t *testing.T)
 	m.Cfg.ShortMemoryMessagesCount = 2
 	m.Cfg.SummaryMemoryStep = 1
 	m.Tokens.MessageCount = 4
-	m.ShortTerm = []History{
-		{Question: ShotTermQuestion{Text: "q1"}, Answer: ShotTermAnswer{Text: "a1"}},
-		{Question: ShotTermQuestion{Text: "q2"}, Answer: ShotTermAnswer{Text: "a2"}},
+	m.ShortTerm = []models.History{
+		{Question: models.ShotTermQuestion{Text: "q1"}, Answer: models.ShotTermAnswer{Text: "a1"}},
+		{Question: models.ShotTermQuestion{Text: "q2"}, Answer: models.ShotTermAnswer{Text: "a2"}},
 	}
 
 	oldEnqueue := enqueueSummaryFn
@@ -281,9 +281,9 @@ func TestSummaryShortMemory_DoesNotDropMessagesOnEnqueueError(t *testing.T) {
 	m.Cfg.ShortMemoryMessagesCount = 2
 	m.Cfg.SummaryMemoryStep = 1
 	m.Tokens.MessageCount = 4
-	m.ShortTerm = []History{
-		{Question: ShotTermQuestion{Text: "q1"}, Answer: ShotTermAnswer{Text: "a1"}},
-		{Question: ShotTermQuestion{Text: "q2"}, Answer: ShotTermAnswer{Text: "a2"}},
+	m.ShortTerm = []models.History{
+		{Question: models.ShotTermQuestion{Text: "q1"}, Answer: models.ShotTermAnswer{Text: "a1"}},
+		{Question: models.ShotTermQuestion{Text: "q2"}, Answer: models.ShotTermAnswer{Text: "a2"}},
 	}
 
 	oldEnqueue := enqueueSummaryFn
@@ -318,8 +318,8 @@ func TestSummaryShortMemory_UsesConfigPrompt(t *testing.T) {
 	m.Cfg.SummaryMemoryStep = 1
 	m.Cfg.PromtMemorySummary = "prompt from config"
 	m.Tokens.MessageCount = 2
-	m.ShortTerm = []History{
-		{Question: ShotTermQuestion{Text: "q1"}, Answer: ShotTermAnswer{Text: "a1"}},
+	m.ShortTerm = []models.History{
+		{Question: models.ShotTermQuestion{Text: "q1"}, Answer: models.ShotTermAnswer{Text: "a1"}},
 	}
 
 	oldEnqueue := enqueueSummaryFn
@@ -371,10 +371,10 @@ func TestShortMemoryFill_RespectsTokenLimit(t *testing.T) {
 	m := newTestMemory()
 	m.Tokens.ContextCoeff = []float32{1}
 	m.Tokens.ShortTermLimit = 6
-	m.ShortTerm = []History{
-		{Question: ShotTermQuestion{Text: "a"}, Answer: ShotTermAnswer{Text: "b"}},
-		{Question: ShotTermQuestion{Text: "cc"}, Answer: ShotTermAnswer{Text: "dd"}},
-		{Question: ShotTermQuestion{Text: "eee"}, Answer: ShotTermAnswer{Text: "fff"}},
+	m.ShortTerm = []models.History{
+		{Question: models.ShotTermQuestion{Text: "a"}, Answer: models.ShotTermAnswer{Text: "b"}},
+		{Question: models.ShotTermQuestion{Text: "cc"}, Answer: models.ShotTermAnswer{Text: "dd"}},
+		{Question: models.ShotTermQuestion{Text: "eee"}, Answer: models.ShotTermAnswer{Text: "fff"}},
 	}
 
 	shortTokens := 0

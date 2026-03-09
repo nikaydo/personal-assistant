@@ -9,4 +9,10 @@ type Message struct {
 	Reasoning  string          `json:"reasoning,omitempty"`
 	ToolCalls  []tool.ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
+	Type       string          `json:"type,omitempty"`
+	ID         string          `json:"id,omitempty"`
+	CallId     string          `json:"call_id,omitempty"`
+	Name       string          `json:"name,omitempty"`
+	Arguments  string          `json:"arguments,omitempty"`
+	Output     string          `json:"output,omitempty"`
 }

@@ -36,9 +36,14 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 	}
 
 	if len(msgChoice.ToolCalls) > 0 {
-		err := fmt.Errorf("%w: model returned %d tool call(s)", ErrToolCallsNotImplemented, len(msgChoice.ToolCalls))
-		ai.Logger.Warn("MakeAsk: tool calls are not implemented", "tool_calls", len(msgChoice.ToolCalls))
-		return mod.ResponseBody{}, err
+		ai.Logger.Task("Found tool in response", respLLM)
+		// pass pointer to the system memory field so it can be created/updated
+		resp, err := ai.Tools.DetectChosenTool(respLLM, ai.Memory.SystemMemory, ai.Memory.ToolsMemory, history)
+		if err != nil {
+			return mod.ResponseBody{}, err
+		}
+		ai.Logger.Task("DetectChosenTool:", respLLM, "Response:", resp)
+		return resp, nil
 	}
 
 	if msgChoice.Content == "" {

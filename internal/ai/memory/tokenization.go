@@ -85,7 +85,7 @@ func (ct *ContextTokens) ContextCoeffCalc(symbolsInContext int, body models.Resp
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
-	ct.ContextCoeff = append(ct.ContextCoeff, float32(symbolsInContext)/float32(body.Usage.TotalTokens))
+	ct.ContextCoeff = append(ct.ContextCoeff, float32(symbolsInContext)/float32(body.Usage.PromptTokens))
 	if len(ct.ContextCoeff) > window {
 		ct.ContextCoeff = ct.ContextCoeff[len(ct.ContextCoeff)-window:]
 	}
