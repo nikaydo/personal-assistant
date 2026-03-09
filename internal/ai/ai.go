@@ -35,19 +35,24 @@ func Init(config config.Config, aiLog *logg.Logger, db *database.Database) *Ai {
 	queue := llmcalls.NewQueue(config, 64, queueLog)
 	queue.QueueStart()
 	tools := tools.Tool{Dbase: db, Cfg: config}
-	return &Ai{
-		Queue: queue,
-		Tools: tools,
-		Memory: &memory.Memory{
-			DBase:  db,
-			Cfg:    config,
-			Logger: aiLog,
-			Tools:  tools,
-			Tokens: memory.ContextTokens{
-				ContextCoeff:      []float32{config.ContextCoeff},
-				ContextCoeffCount: config.ContextCoeffCount,
-			},
+	mem := &memory.Memory{
+		DBase:  db,
+		Cfg:    config,
+		Logger: aiLog,
+		Tools:  tools,
+		Tokens: memory.ContextTokens{
+			ContextCoeff:      []float32{config.ContextCoeff},
+			ContextCoeffCount: config.ContextCoeffCount,
 		},
+	}
+	if err := mem.LoadState(config.MemoryStateFile); err != nil {
+		aiLog.Warn("Init: failed to load memory state, starting with empty state", "error", err)
+	}
+
+	return &Ai{
+		Queue:  queue,
+		Tools:  tools,
+		Memory: mem,
 		Config: config,
 		Logger: aiLog,
 	}

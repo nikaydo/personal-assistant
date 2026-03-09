@@ -10,14 +10,14 @@
     "pinecore_cloud":"aws",
     "pinecore_region":"us-east-1",
     "pinecore_embedModel":"llama-text-embed-v2",
-    "local_db_path":"./data/localdb",
     "local_vector_dimension":1024,
-    "local_mysql_dsn":"root:root@tcp(127.0.0.1:3306)/assistant?parseTime=true",
-    "local_mysql_table":"summaries",
+    "local_postgres_dsn":"postgres://assistant_app:pass@127.0.0.1:5432/assistant?sslmode=disable",
+    "local_postgres_table":"summaries",
 
     "max_tokens_context": 0,
     "high_border_max_context":5000,
     "summary_memory_step":1500,
+    "memory_state_file":"./data/memory_state.json",
     
     "jira_api_key":"",
     "jira_email":"",

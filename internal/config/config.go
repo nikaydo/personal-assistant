@@ -22,10 +22,9 @@ type Config struct {
 	PinecoreCloud      string `json:"pinecore_cloud"`
 	PinecoreRegion     string `json:"pinecore_region"`
 	PinecoreEmbedModel string `json:"pinecore_embedModel"`
-	LocalDBPath        string `json:"local_db_path"`
 	LocalVectorDim     int    `json:"local_vector_dimension"`
-	LocalMySQLDSN      string `json:"local_mysql_dsn"`
-	LocalMySQLTable    string `json:"local_mysql_table"`
+	LocalPostgresDSN   string `json:"local_postgres_dsn"`
+	LocalPostgresTable string `json:"local_postgres_table"`
 
 	//Config for context
 	ContextLimit             int     `json:"context_limit"`
@@ -40,6 +39,7 @@ type Config struct {
 	ShortTermPercent         int     `json:"short_term_percent"`
 	SystemPromptPercent      int     `json:"system_prompt_percent"`
 	ShortMemoryMessagesCount int     `json:"short_memory_messages_count"`
+	MemoryStateFile          string  `json:"memory_state_file"`
 	//Api config
 	ApiHost string `json:"api_host"`
 	ApiPort int    `json:"api_port"`
@@ -79,9 +79,8 @@ func applyEnvOverrides(config *Config) error {
 	config.PinecoreCloud = getEnvString("PINECORE_CLOUD", config.PinecoreCloud)
 	config.PinecoreRegion = getEnvString("PINECORE_REGION", config.PinecoreRegion)
 	config.PinecoreEmbedModel = getEnvString("PINECORE_EMBED_MODEL", config.PinecoreEmbedModel)
-	config.LocalDBPath = getEnvString("LOCAL_DB_PATH", config.LocalDBPath)
-	config.LocalMySQLDSN = getEnvString("LOCAL_MYSQL_DSN", config.LocalMySQLDSN)
-	config.LocalMySQLTable = getEnvString("LOCAL_MYSQL_TABLE", config.LocalMySQLTable)
+	config.LocalPostgresDSN = getEnvString("LOCAL_POSTGRES_DSN", config.LocalPostgresDSN)
+	config.LocalPostgresTable = getEnvString("LOCAL_POSTGRES_TABLE", config.LocalPostgresTable)
 
 	if config.LocalVectorDim, err = getEnvInt("LOCAL_VECTOR_DIMENSION", config.LocalVectorDim); err != nil {
 		return err
@@ -96,6 +95,7 @@ func applyEnvOverrides(config *Config) error {
 	if config.SummaryMemoryStep, err = getEnvInt("SUMMARY_MEMORY_STEP", config.SummaryMemoryStep); err != nil {
 		return err
 	}
+	config.MemoryStateFile = getEnvString("MEMORY_STATE_FILE", config.MemoryStateFile)
 
 	config.ApiHost = getEnvString("API_HOST", config.ApiHost)
 	if config.ApiPort, err = getEnvInt("API_PORT", config.ApiPort); err != nil {

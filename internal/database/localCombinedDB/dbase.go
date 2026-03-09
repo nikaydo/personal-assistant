@@ -2,29 +2,33 @@ package localcombineddb
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
-type Dbase struct {
-	HNSW  *HNSWStore
-	MySQL *MySQLStore
+type Store struct {
+	PG *PostgresStore
 }
 
-// Backward-compatible alias used by internal/database/dbase.go.
-type DbaseVector = Dbase
+// Backward-compatible alias used by internal/database/database.go.
+type DbaseVector = Store
+
+type VectorRecord struct {
+	ID        string `json:"id"`
+	Dimension int    `json:"dimension"`
+	Active    bool   `json:"active"`
+}
 
 type SaveResult struct {
-	Vector HNSWRecord               `json:"vector"`
+	Vector VectorRecord             `json:"vector"`
 	Data   models.SummarizeResponse `json:"data"`
 }
 
 type FullRecord struct {
 	ID     string                   `json:"id"`
-	Vector HNSWRecord               `json:"vector"`
+	Vector VectorRecord             `json:"vector"`
 	Data   models.SummarizeResponse `json:"data"`
 }
 
@@ -34,67 +38,42 @@ type SearchResult struct {
 	Data     models.SummarizeResponse `json:"data"`
 }
 
-func NewCombined(hnswStore *HNSWStore, mysqlStore *MySQLStore) (*Dbase, error) {
-	if hnswStore == nil {
-		return nil, errors.New("hnsw store is nil")
+func NewCombined(pgStore *PostgresStore) (*Store, error) {
+	if pgStore == nil {
+		return nil, errors.New("postgres store is nil")
 	}
-	if mysqlStore == nil {
-		return nil, errors.New("mysql store is nil")
-	}
-	return &Dbase{HNSW: hnswStore, MySQL: mysqlStore}, nil
+	return &Store{PG: pgStore}, nil
 }
 
-func Init(path string, dimension int, sqlDB *sql.DB, mysqlTable string) (*Dbase, error) {
-	hnswStore, err := NewHNSW(path, dimension)
+func Init(dimension int, sqlDB *sql.DB, table string) (*Store, error) {
+	pgStore, err := NewPostgresStore(sqlDB, table, dimension)
 	if err != nil {
 		return nil, err
 	}
-	mysqlStore, err := NewMySQLStore(sqlDB, mysqlTable)
-	if err != nil {
-		return nil, err
-	}
-	return NewCombined(hnswStore, mysqlStore)
+	return NewCombined(pgStore)
 }
 
-func (db *Dbase) Save(id string, vector []float32, data models.SummarizeResponse) (SaveResult, error) {
-	if db == nil || db.HNSW == nil || db.MySQL == nil {
-		return SaveResult{}, errors.New("combined db is not initialized")
-	}
-	if id == "" {
-		return SaveResult{}, errors.New("id is required")
+func (db *Store) Save(id string, vector []float32, data models.SummarizeResponse) (SaveResult, error) {
+	if db == nil || db.PG == nil {
+		return SaveResult{}, errors.New("local db is not initialized")
 	}
 
-	if err := db.MySQL.Upsert(id, data); err != nil {
+	if err := db.PG.Upsert(id, vector, data); err != nil {
 		return SaveResult{}, err
 	}
 
-	payloadBytes, err := json.Marshal(data)
-	if err != nil {
-		return SaveResult{}, fmt.Errorf("marshal summary payload: %w", err)
-	}
-
-	vecRec, err := db.HNSW.Upsert(id, vector, string(payloadBytes))
-	if err != nil {
-		rollbackErr := db.MySQL.Delete(id)
-		if rollbackErr != nil {
-			return SaveResult{}, fmt.Errorf("hnsw save failed: %v; mysql rollback failed: %w", err, rollbackErr)
-		}
-		return SaveResult{}, err
-	}
-
-	return SaveResult{Vector: vecRec, Data: data}, nil
+	return SaveResult{
+		Vector: VectorRecord{ID: id, Dimension: len(vector), Active: true},
+		Data:   data,
+	}, nil
 }
 
-func (db *Dbase) Get(id string) (FullRecord, bool, error) {
-	if db == nil || db.HNSW == nil || db.MySQL == nil {
-		return FullRecord{}, false, errors.New("combined db is not initialized")
+func (db *Store) Get(id string) (FullRecord, bool, error) {
+	if db == nil || db.PG == nil {
+		return FullRecord{}, false, errors.New("local db is not initialized")
 	}
 
-	vecRec, ok := db.HNSW.Get(id)
-	if !ok {
-		return FullRecord{}, false, nil
-	}
-	data, ok, err := db.MySQL.Get(id)
+	rec, ok, err := db.PG.Get(id)
 	if err != nil {
 		return FullRecord{}, false, err
 	}
@@ -103,43 +82,47 @@ func (db *Dbase) Get(id string) (FullRecord, bool, error) {
 	}
 
 	return FullRecord{
-		ID:     id,
-		Vector: vecRec,
-		Data:   data,
+		ID: id,
+		Vector: VectorRecord{
+			ID:        id,
+			Dimension: db.PG.Dimension(),
+			Active:    true,
+		},
+		Data: rec.Data,
 	}, true, nil
 }
 
-func (db *Dbase) Search(vector []float32, topK int) ([]SearchResult, error) {
-	if db == nil || db.HNSW == nil || db.MySQL == nil {
-		return nil, errors.New("combined db is not initialized")
+func (db *Store) Search(vector []float32, topK int) ([]SearchResult, error) {
+	if db == nil || db.PG == nil {
+		return nil, errors.New("local db is not initialized")
 	}
 
-	candidates, err := db.HNSW.Search(vector, topK)
+	records, err := db.PG.Search(vector, topK)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]SearchResult, 0, len(candidates))
-	for _, c := range candidates {
-		data, ok, err := db.MySQL.Get(c.Record.ID)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
+	out := make([]SearchResult, 0, len(records))
+	for _, rec := range records {
 		out = append(out, SearchResult{
-			ID:       c.Record.ID,
-			Distance: c.Distance,
-			Data:     data,
+			ID:       rec.ID,
+			Distance: rec.Distance,
+			Data:     rec.Data,
 		})
 	}
 	return out, nil
 }
 
-func (db *Dbase) SearchByFilters(filters MySQLFilters) ([]MySQLRecord, error) {
-	if db == nil || db.MySQL == nil {
-		return nil, errors.New("combined db mysql is not initialized")
+func (db *Store) SearchByFilters(filters Filters) ([]Record, error) {
+	if db == nil || db.PG == nil {
+		return nil, errors.New("local db is not initialized")
 	}
-	return db.MySQL.SearchByFilters(filters)
+	return db.PG.SearchByFilters(filters)
+}
+
+func (db *Store) DebugString() string {
+	if db == nil || db.PG == nil {
+		return "local store: nil"
+	}
+	return fmt.Sprintf("local store: postgres table=%s dim=%d", db.PG.Table(), db.PG.Dimension())
 }

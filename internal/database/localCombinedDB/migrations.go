@@ -15,7 +15,7 @@ const migrationTableName = "schema_migrations"
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-func (s *MySQLStore) runMigrations() error {
+func (s *PostgresStore) runMigrations() error {
 	if err := s.ensureMigrationTable(); err != nil {
 		return err
 	}
@@ -53,12 +53,12 @@ func (s *MySQLStore) runMigrations() error {
 	return nil
 }
 
-func (s *MySQLStore) ensureMigrationTable() error {
+func (s *PostgresStore) ensureMigrationTable() error {
 	q := fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS %s (
-	version VARCHAR(191) PRIMARY KEY,
-	applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`, migrationTableName)
+	version TEXT PRIMARY KEY,
+	applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`, migrationTableName)
 
 	if _, err := s.db.Exec(q); err != nil {
 		return fmt.Errorf("ensure migration table: %w", err)
@@ -66,8 +66,8 @@ CREATE TABLE IF NOT EXISTS %s (
 	return nil
 }
 
-func (s *MySQLStore) isMigrationApplied(name string) (bool, error) {
-	q := fmt.Sprintf(`SELECT 1 FROM %s WHERE version = ? LIMIT 1`, migrationTableName)
+func (s *PostgresStore) isMigrationApplied(name string) (bool, error) {
+	q := fmt.Sprintf(`SELECT 1 FROM %s WHERE version = $1 LIMIT 1`, migrationTableName)
 	var one int
 	err := s.db.QueryRow(q, name).Scan(&one)
 	if err == nil {
@@ -79,13 +79,14 @@ func (s *MySQLStore) isMigrationApplied(name string) (bool, error) {
 	return false, fmt.Errorf("check migration %s: %w", name, err)
 }
 
-func (s *MySQLStore) applyMigration(name string) error {
+func (s *PostgresStore) applyMigration(name string) error {
 	raw, err := migrationFiles.ReadFile("migrations/" + name)
 	if err != nil {
 		return fmt.Errorf("read migration %s: %w", name, err)
 	}
 
 	sqlText := strings.ReplaceAll(string(raw), "{{table}}", s.table)
+	sqlText = strings.ReplaceAll(sqlText, "{{dimension}}", fmt.Sprintf("%d", s.dimension))
 	statements := splitSQLStatements(sqlText)
 	if len(statements) == 0 {
 		return nil
@@ -105,7 +106,7 @@ func (s *MySQLStore) applyMigration(name string) error {
 		}
 	}
 
-	q := fmt.Sprintf(`INSERT INTO %s (version) VALUES (?)`, migrationTableName)
+	q := fmt.Sprintf(`INSERT INTO %s (version) VALUES ($1)`, migrationTableName)
 	if _, err := tx.Exec(q, name); err != nil {
 		return fmt.Errorf("mark migration %s as applied: %w", name, err)
 	}
@@ -134,6 +135,6 @@ func isIgnorableMigrationError(err error) bool {
 		return false
 	}
 	e := strings.ToLower(err.Error())
-	return strings.Contains(e, "duplicate key name") ||
-		strings.Contains(e, "already exists")
+	return strings.Contains(e, "already exists") ||
+		strings.Contains(e, "duplicate")
 }

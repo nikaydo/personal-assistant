@@ -74,6 +74,11 @@ func (api *API) Shutdown(ctx context.Context) error {
 	if api.Ai != nil && api.Ai.Queue != nil {
 		api.Ai.Queue.Stop()
 	}
+	if api.Ai != nil && api.Ai.Memory != nil {
+		if err := api.Ai.Memory.FlushState(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if api.Ai != nil && api.Ai.Memory != nil && api.Ai.Memory.DBase != nil {
 		if err := api.Ai.Memory.DBase.Close(); err != nil {
 			errs = append(errs, err)

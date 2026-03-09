@@ -79,6 +79,11 @@ func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmc
 	m.mu.RUnlock()
 	m.Tokens.ContextCoeffCalc(symbolsInContext, answer)
 	m.Logger.Memory("ContextCoeffCalc: calculated context coefficient", "context_coeff", fmt.Sprintf("%v/[%v]", m.Tokens.GetContextCoeff(), m.Tokens.ContextCoeffSnapshot()), "total_tokens", answer.Usage.TotalTokens, "symbols_in_context", symbolsInContext)
+	if err := m.SaveState(""); err != nil {
+		if m.Logger != nil {
+			m.Logger.Warn("Memory: failed to persist memory state", "error", err)
+		}
+	}
 }
 
 func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {

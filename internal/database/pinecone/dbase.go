@@ -180,7 +180,7 @@ func (db *DBase) GetSummary(id string) (models.SummarizeResponse, time.Time, tim
 	return data, createdAt, updatedAt, true, nil
 }
 
-func (db *DBase) SearchByVector(vector []float32, topK int, filters localCombinedDB.MySQLFilters) ([]SearchMatch, error) {
+func (db *DBase) SearchByVector(vector []float32, topK int, filters localCombinedDB.Filters) ([]SearchMatch, error) {
 	if db.IndexConn == nil {
 		if err := db.EnsureReady(); err != nil {
 			return nil, err
@@ -228,7 +228,7 @@ func (db *DBase) SearchByVector(vector []float32, topK int, filters localCombine
 	return out, nil
 }
 
-func (db *DBase) SearchByFilters(filters localCombinedDB.MySQLFilters) ([]SearchMatch, error) {
+func (db *DBase) SearchByFilters(filters localCombinedDB.Filters) ([]SearchMatch, error) {
 	if db.IndexConn == nil {
 		if err := db.EnsureReady(); err != nil {
 			return nil, err
@@ -272,7 +272,7 @@ func (db *DBase) SearchByFilters(filters localCombinedDB.MySQLFilters) ([]Search
 	return out, nil
 }
 
-func buildPineconeFilter(filters localCombinedDB.MySQLFilters) map[string]any {
+func buildPineconeFilter(filters localCombinedDB.Filters) map[string]any {
 	items := make([]map[string]any, 0, 6)
 	if len(filters.IDs) > 0 {
 		items = append(items, map[string]any{"id": map[string]any{"$in": filters.IDs}})

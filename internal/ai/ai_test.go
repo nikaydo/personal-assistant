@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"testing"
 
 	"github.com/nikaydo/personal-assistant/internal/ai/memory"
@@ -117,5 +118,57 @@ func TestMakeAsk_ReturnsNotImplementedOnToolCalls(t *testing.T) {
 	_, err := ai.MakeAsk("hello", nil)
 	if !errors.Is(err, ErrToolCallsNotImplemented) {
 		t.Fatalf("expected ErrToolCallsNotImplemented, got %v", err)
+	}
+}
+
+func TestInit_LoadsMemoryStateFromFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory_state.json")
+	logger := newTestLogger()
+
+	seed := &memory.Memory{
+		Logger: logger,
+		Cfg: config.Config{
+			MemoryStateFile: path,
+		},
+		Tokens: memory.ContextTokens{
+			ContextCoeff:      []float32{1},
+			ContextCoeffCount: 12,
+		},
+	}
+	seed.ShortTerm = []memory.History{
+		{
+			Question: memory.ShotTermQuestion{Text: "q1"},
+			Answer:   memory.ShotTermAnswer{Text: "a1"},
+		},
+	}
+	seed.Tokens.MessageCount = 1
+	seed.Tokens.SetContextCoeffSnapshot([]float32{1.5, 2.5})
+	if err := seed.SaveState(path); err != nil {
+		t.Fatalf("SaveState returned error: %v", err)
+	}
+
+	ai := Init(config.Config{
+		ContextCoeff:      5,
+		ContextCoeffCount: 12,
+		MemoryStateFile:   path,
+	}, logger, nil)
+	t.Cleanup(func() {
+		if ai.Queue != nil {
+			ai.Queue.Stop()
+		}
+	})
+
+	if len(ai.Memory.ShortTerm) != 1 {
+		t.Fatalf("unexpected restored short-term length: %d", len(ai.Memory.ShortTerm))
+	}
+	if ai.Memory.ShortTerm[0].Question.Text != "q1" {
+		t.Fatalf("unexpected restored short-term content: %#v", ai.Memory.ShortTerm[0])
+	}
+	if ai.Memory.Tokens.MessageCount != 1 {
+		t.Fatalf("unexpected restored message count: %d", ai.Memory.Tokens.MessageCount)
+	}
+	coeff := ai.Memory.Tokens.ContextCoeffSnapshot()
+	if len(coeff) != 2 || coeff[0] != 1.5 || coeff[1] != 2.5 {
+		t.Fatalf("unexpected restored context coefficients: %#v", coeff)
 	}
 }

@@ -61,6 +61,17 @@ func (ct *ContextTokens) ContextCoeffSnapshot() []float32 {
 	return out
 }
 
+func (ct *ContextTokens) SetContextCoeffSnapshot(coeff []float32) {
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
+
+	ct.ContextCoeff = ct.ContextCoeff[:0]
+	if len(coeff) == 0 {
+		return
+	}
+	ct.ContextCoeff = append(ct.ContextCoeff, coeff...)
+}
+
 func (ct *ContextTokens) ContextCoeffCalc(symbolsInContext int, body models.ResponseBody) {
 	if body.Usage.TotalTokens <= 0 || symbolsInContext <= 0 {
 		return

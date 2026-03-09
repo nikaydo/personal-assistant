@@ -31,7 +31,7 @@ Result: more stable, context-aware answers with predictable token budgeting.
 | API | `POST /chat`, `POST /memory`, `POST /msg` |
 | LLM | OpenRouter chat + embeddings |
 | Memory | In-process short-term + persisted long-term summaries |
-| Storage modes | Local (`HNSW + MySQL`) or Pinecone |
+| Storage modes | Local (`PostgreSQL + pgvector`) or Pinecone |
 | Runtime | Request queue, graceful shutdown, HTTP timeouts |
 
 ---
@@ -43,7 +43,7 @@ Result: more stable, context-aware answers with predictable token budgeting.
 | `internal/api` | Stable | Core endpoints and handlers are in place |
 | `internal/llmCalls` | Stable | Queue + request layer with tests |
 | `internal/ai/memory` | Stable | Context assembly + safer summarization commit |
-| `internal/database/localCombinedDB` | Stable | HNSW + MySQL combined storage |
+| `internal/database/localCombinedDB` | Stable | PostgreSQL + pgvector combined storage |
 | `internal/database/pinecone` | Beta | Works when configured; less test depth than local mode |
 | Tool calls in `/chat` flow | Limited | Returns `501` when model emits `tool_calls` |
 
@@ -81,7 +81,7 @@ internal/api                         # HTTP handlers and routes
 internal/ai                          # memory orchestration + model interaction
 internal/llmCalls                    # OpenRouter calls + queue
 internal/database                    # DB abstraction (local / pinecone)
-internal/database/localCombinedDB    # HNSW + MySQL implementation
+internal/database/localCombinedDB    # PostgreSQL + pgvector implementation
 internal/config                      # settings + env overrides
 internal/models                      # DTOs
 internal/logg                        # structured logger
@@ -113,9 +113,8 @@ Use one mode at a time.
 
 **Local mode** (used when Pinecone key is empty):
 
-- `local_mysql_dsn`
-- `local_mysql_table`
-- `local_db_path`
+- `local_postgres_dsn`
+- `local_postgres_table`
 - `local_vector_dimension`
 
 ### 3) Service
@@ -132,6 +131,7 @@ Use one mode at a time.
 - `context_saved_for_response`
 - `summary_memory_step`
 - `short_memory_messages_count`
+- `memory_state_file` (default: `./data/memory_state.json`)
 - `context_coeff`
 - `context_coeff_count`
 - `system_memory_percent`
@@ -145,13 +145,14 @@ Use one mode at a time.
 
 ## Quick Start
 
-### Local MySQL bootstrap
+### Local PostgreSQL bootstrap
 
 ```bash
-mysql -u root -p < scripts/mysql_bootstrap.sql
+psql -U postgres -d postgres -f scripts/postgres_bootstrap.sql
+psql "$LOCAL_POSTGRES_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-Set `local_mysql_dsn` in `settings.json` or `LOCAL_MYSQL_DSN`.
+Set `local_postgres_dsn` in `settings.json` or `LOCAL_POSTGRES_DSN`.
 
 ### Run service
 

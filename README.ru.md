@@ -31,7 +31,7 @@
 | API | `POST /chat`, `POST /memory`, `POST /msg` |
 | LLM | OpenRouter chat + embeddings |
 | Память | short-term в процессе + long-term summary в БД |
-| Режимы хранения | Local (`HNSW + MySQL`) или Pinecone |
+| Режимы хранения | Local (`PostgreSQL + pgvector`) или Pinecone |
 | Runtime | Очередь запросов, graceful shutdown, HTTP timeouts |
 
 ---
@@ -43,7 +43,7 @@
 | `internal/api` | Stable | Основные endpoint’ы и хендлеры готовы |
 | `internal/llmCalls` | Stable | Очередь и слой запросов покрыты тестами |
 | `internal/ai/memory` | Stable | Сборка контекста + безопасный commit суммаризации |
-| `internal/database/localCombinedDB` | Stable | Комбинация HNSW + MySQL |
+| `internal/database/localCombinedDB` | Stable | Комбинация PostgreSQL + pgvector |
 | `internal/database/pinecone` | Beta | Работает при конфиге, но покрытие ниже local mode |
 | Tool calls в `/chat` flow | Limited | При `tool_calls` возвращается `501` |
 
@@ -81,7 +81,7 @@ internal/api                         # HTTP-роуты и хендлеры
 internal/ai                          # orchestration памяти и модели
 internal/llmCalls                    # вызовы OpenRouter + очередь
 internal/database                    # абстракция БД (local / pinecone)
-internal/database/localCombinedDB    # реализация HNSW + MySQL
+internal/database/localCombinedDB    # реализация PostgreSQL + pgvector
 internal/config                      # settings + env overrides
 internal/models                      # DTO
 internal/logg                        # структурный логгер
@@ -113,9 +113,8 @@ internal/logg                        # структурный логгер
 
 **Local режим** (если ключ Pinecone пуст):
 
-- `local_mysql_dsn`
-- `local_mysql_table`
-- `local_db_path`
+- `local_postgres_dsn`
+- `local_postgres_table`
 - `local_vector_dimension`
 
 ### 3) Сервис
@@ -132,6 +131,7 @@ internal/logg                        # структурный логгер
 - `context_saved_for_response`
 - `summary_memory_step`
 - `short_memory_messages_count`
+- `memory_state_file` (по умолчанию: `./data/memory_state.json`)
 - `context_coeff`
 - `context_coeff_count`
 - `system_memory_percent`
@@ -145,13 +145,14 @@ internal/logg                        # структурный логгер
 
 ## Быстрый старт
 
-### Подготовка MySQL (local mode)
+### Подготовка PostgreSQL (local mode)
 
 ```bash
-mysql -u root -p < scripts/mysql_bootstrap.sql
+psql -U postgres -d postgres -f scripts/postgres_bootstrap.sql
+psql "$LOCAL_POSTGRES_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-Укажи `local_mysql_dsn` в `settings.json` или `LOCAL_MYSQL_DSN`.
+Укажи `local_postgres_dsn` в `settings.json` или `LOCAL_POSTGRES_DSN`.
 
 ### Запуск
 
