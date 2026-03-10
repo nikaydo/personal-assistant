@@ -34,6 +34,7 @@ func (t *Tool) DetectChosenTool(body models.ResponseBody, SystemMemory *models.S
 		if err := change_agent_settings(body, SystemMemory); err != nil {
 			return models.ResponseBody{}, err
 		}
+		fmt.Println(body)
 		tool, msg := makeToolAndMsg(body, FuncName, msg)
 		*tools = append(*tools, tool)
 		var resp models.ResponseBody
@@ -112,18 +113,18 @@ func GetArgs(body models.ResponseBody, args any) error {
 }
 
 func (t *Tool) AskBack(msg []models.Message, tool []models.Tool) (models.ResponseBody, error) {
-	respLLM, err := t.Queue.AddToQueue(llmcalls.QueueItem{Body: t.makeBody(msg, tool)})
+	respLLM, err := t.Queue.AddToQueue(llmcalls.QueueItem{Body: t.makeBody(msg, tool, "auto")})
 	if err != nil {
 		return models.ResponseBody{}, err
 	}
 	return respLLM, nil
 }
 
-func (t *Tool) makeBody(messages []models.Message, tools []models.Tool) models.RequestBody {
+func (t *Tool) makeBody(messages []models.Message, tools []models.Tool, ToolsChoise string) models.RequestBody {
 	body := models.RequestBody{
 		Model:       t.Model,
 		Messages:    messages,
-		ToolsChoise: "auto",
+		ToolsChoise: ToolsChoise,
 	}
 	if len(tools) > 0 {
 		body.Tools = tools

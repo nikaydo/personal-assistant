@@ -12,9 +12,11 @@ import (
 	"github.com/nikaydo/personal-assistant/internal/api"
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/logg"
+	"github.com/nikaydo/personal-assistant/internal/services/wikipedia"
 )
 
 func main() {
+	wikipedia.P()
 	l := logg.InitLogger()
 	systemLog := l.WithModule("SYSTEM")
 	apiLog := l.WithModule("API")

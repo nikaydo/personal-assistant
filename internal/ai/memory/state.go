@@ -40,7 +40,6 @@ func (m *Memory) resolveStatePath(path string) string {
 func (m *Memory) snapshotState() State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
 	state := State{
 		Version:      stateVersion,
 		UpdatedAt:    time.Now().UTC().Format(time.RFC3339Nano),

@@ -178,7 +178,7 @@ func GetToolDefault() []models.Tool {
 									"description": "Name of the tool to call",
 								},
 
-								"args": map[string]any{
+								"arguments": map[string]any{
 									"type":                 "object",
 									"description":          "Arguments for the tool",
 									"additionalProperties": true,
