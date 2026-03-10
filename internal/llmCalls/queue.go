@@ -111,6 +111,19 @@ func (q *Queue) Stop() {
 	q.started.Store(false)
 }
 
+// sanitizeMessages ensures no message will be marshalled without a content field.
+// the OpenRouter API treats an omitted "content" as null, which triggers a 400 error
+// when the field is expected to be a string.  We replace any empty string with a
+// single space so the JSON encoder always emits `"content":" "`.
+func sanitizeMessages(msgs []models.Message) []models.Message {
+	for i, m := range msgs {
+		if m.Content == "" {
+			msgs[i].Content = " "
+		}
+	}
+	return msgs
+}
+
 func (q *Queue) AddToQueue(item QueueItem) (models.ResponseBody, error) {
 	if !q.started.Load() {
 		return models.ResponseBody{}, errors.New("queue is not started")
@@ -119,6 +132,9 @@ func (q *Queue) AddToQueue(item QueueItem) (models.ResponseBody, error) {
 	if ctx == nil {
 		return models.ResponseBody{}, ErrQueueStopped
 	}
+
+	// make sure the request body is safe: content must not be empty
+	item.Body.Messages = sanitizeMessages(item.Body.Messages)
 
 	item.ID = int(q.nextID.Add(1))
 	job := queueJob{

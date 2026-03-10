@@ -7,7 +7,9 @@ import (
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/database"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
+	"github.com/nikaydo/personal-assistant/internal/logg"
 	"github.com/nikaydo/personal-assistant/internal/models"
+	"github.com/nikaydo/personal-assistant/internal/services"
 	command "github.com/nikaydo/personal-assistant/internal/services/command"
 )
 
@@ -20,6 +22,8 @@ type Agent struct {
 	Cfg config.Config
 
 	Queue *llmcalls.Queue
+
+	Logger *logg.Logger
 
 	SystemPrompt string
 
@@ -52,38 +56,36 @@ func parseAgentResponse(body models.ResponseBody) (AgentResponse, error) {
 }
 
 func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
-
+	a.Logger.Info("Agent.Run called", "initial_tool", body.Choices[0].Message.ToolCalls[0].Function.Name)
 	r, err := parseAgentResponse(body)
 	if err != nil {
+		a.Logger.Error("parseAgentResponse failed", "error", err)
 		return models.ResponseBody{}, err
 	}
-	output, err := a.RunFunc(r)
-	if err != nil {
-		return models.ResponseBody{}, err
+	// make sure the first thought is never empty (omitempty in struct would drop it)
+	safeThought := r.Thought
+	if safeThought == "" {
+		safeThought = " "
 	}
-
 	*a.History = append(*a.History, models.Message{
-		Role:      "function",
-		ID:        body.Choices[0].Message.ID,
-		Type:      body.Choices[0].Message.Type,
-		Name:      body.Choices[0].Message.ToolCalls[0].Function.Name,
-		Arguments: body.Choices[0].Message.ToolCalls[0].Function.Arguments,
-		Output:    "final",
-		Content:   "call input and output"})
+		Role:    "assistant",
+		Content: safeThought})
 
-	if err := a.CollectContext(body, output); err != nil {
-		return models.ResponseBody{}, err
-	}
 	for range a.Steps {
 		respLLM, err := a.AskLLM("auto")
 		if err != nil {
+			a.Logger.Error("AskLLM failed", "error", err)
 			return models.ResponseBody{}, err
 		}
+		a.Logger.Info("AskLLM: ", respLLM)
 		out, stop, err := a.RunTool(respLLM)
 		if err != nil {
+			a.Logger.Error("RunTool failed", "error", err)
 			return models.ResponseBody{}, err
 		}
+		a.Logger.Info("RunTool: ", out)
 		if stop {
+			a.Logger.Info("agent stopping")
 			*a.History = append(*a.History, models.Message{
 				Role:      "function",
 				ID:        respLLM.Choices[0].Message.ID,
@@ -94,31 +96,29 @@ func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
 				Content:   "call input and output"})
 			return a.AskLLM("none")
 		}
-		if err := a.CollectContext(body, out); err != nil {
+
+		if err := a.CollectContext(respLLM, out); err != nil {
+			a.Logger.Error("CollectContext failed", "error", err)
 			return models.ResponseBody{}, err
 		}
+		a.Logger.Info("RunTool: ", a.History)
 	}
 	return models.ResponseBody{}, errors.New("wtf")
 }
 
 func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
 	for _, i := range body.Choices[0].Message.ToolCalls {
+		a.Logger.Info("RunTool processing", "tool", i.Function.Name)
 		switch i.Function.Name {
 		case "reasoning":
-			args, err := parseAgentResponse(body)
-			if err != nil {
-				return "", false, err
-			}
-			output, err := a.RunFunc(args)
-			if err != nil {
-				return "", false, err
-			}
-			return output, false, nil
+			return "", false, nil
 		case "command":
+			a.Logger.Info("executing command", "args", i.Function.Arguments)
 			// use command service directly for simple invocation
 			svc := command.NewService()
 			out, err := svc.ExecuteFromLLM(i.Function.Arguments)
 			if err != nil {
+				a.Logger.Error("command execution failed", "error", err)
 				return "", false, err
 			}
 			return out, false, nil
@@ -136,17 +136,20 @@ func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
 }
 
 func (a *Agent) RunFunc(args AgentResponse) (string, error) {
+	a.Logger.Info("RunFunc called", "function", args.Func.Function)
 	switch args.Func.Function {
 	case "command":
 		// delegate to the command service which knows how to interpret
 		// the arguments string emitted by the LLM.
-		svc := command.NewService()
+		svc := services.NewCommandService()
 		out, err := svc.ExecuteFromLLM(args.Func.Arguments)
 		if err != nil {
+			a.Logger.Error("RunFunc command failed", "error", err)
 			return "", err
 		}
 		return out, nil
 	default:
+		a.Logger.Warn("RunFunc unknown function", "name", args.Func.Function)
 		return "", errors.New("unknown func")
 	}
 }
@@ -161,12 +164,10 @@ func getFuncNameArgs(body models.ResponseBody) (struct {
 		Args         string
 		FinishReason string
 	}
-	if err := json.Unmarshal([]byte(body.Choices[0].Message.ToolCalls[0].Function.Name), &data.Name); err != nil {
-		return data, err
-	}
-	if err := json.Unmarshal([]byte(body.Choices[0].Message.ToolCalls[0].Function.Arguments), &data.Args); err != nil {
-		return data, err
-	}
+	data.Name = body.Choices[0].Message.ToolCalls[0].Function.Name
+
+	data.Args = body.Choices[0].Message.ToolCalls[0].Function.Arguments
+
 	data.FinishReason = body.Choices[0].FinishReason
 	return data, nil
 }
@@ -174,26 +175,38 @@ func getFuncNameArgs(body models.ResponseBody) (struct {
 func (a *Agent) CollectContext(body models.ResponseBody, funcOutput string) error {
 	data, err := getFuncNameArgs(body)
 	if err != nil {
+		a.Logger.Error("CollectContext getFuncNameArgs failed", "error", err, "body", body)
 		return err
 	}
 	args, err := parseAgentResponse(body)
 	if err != nil {
+		a.Logger.Error("CollectContext parseAgentResponse failed", "error", err)
 		return err
 	}
 	tool := body.Choices[0].Message.ToolCalls[0]
-	*a.History = append(*a.History,
-		models.Message{
-			Role:      "function",
-			ID:        tool.ID,
-			Type:      tool.Type,
-			Name:      data.Name,
-			Arguments: data.Args,
-			Output:    funcOutput,
-			Content:   "call input and output",
-		}, models.Message{
-			Role:    "assistant",
-			Content: args.Thought},
-	)
+
+	if data.Name != "reasoning" {
+		*a.History = append(*a.History,
+			models.Message{
+				Role:      "function",
+				ID:        tool.ID,
+				Type:      tool.Type,
+				Name:      data.Name,
+				Arguments: data.Args,
+				Output:    funcOutput,
+				Content:   "call input and output",
+			},
+		)
+	}
+
+	if args.Thought != "" {
+		*a.History = append(*a.History,
+			models.Message{
+				Role:    "assistant",
+				Content: args.Thought},
+		)
+	}
+
 	return nil
 }
 
@@ -202,6 +215,7 @@ func (a *Agent) AskLLM(ToolsChoise string) (models.ResponseBody, error) {
 		Model:       a.Model,
 		Messages:    *a.History,
 		ToolsChoise: ToolsChoise,
+		Tools:       GetAgentTool(),
 	}})
 	if err != nil {
 		return models.ResponseBody{}, err

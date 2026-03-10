@@ -62,7 +62,7 @@ func GetAgentTool() []models.Tool {
 					"properties": map[string]any{
 						"command": map[string]any{
 							"type":        "string",
-							"description": "Command name or JSON object",
+							"description": "Command name like pwd, cd, ls and etc",
 						},
 						"args": map[string]any{
 							"type":        "array",
@@ -242,23 +242,6 @@ func GetToolDefault() []models.Tool {
 						"thought": map[string]any{
 							"type":        "string",
 							"description": "Internal reasoning step explaining what the agent plans to do next",
-						},
-
-						"action": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-
-								"function": map[string]any{
-									"type":        "string",
-									"description": "Name of the tool to call",
-								},
-
-								"arguments": map[string]any{
-									"type":                 "object",
-									"description":          "Arguments for the tool",
-									"additionalProperties": true,
-								},
-							},
 						},
 					},
 					"required": []string{"thought"},

@@ -24,7 +24,8 @@ func Ask(body models.RequestBody, cfg config.Config) (models.ResponseBody, error
 	}
 	respBody, err := doReq(jsonBody, cfg.ApiUrlOpenrouter, cfg.ApiKeyOpenrouter, "POST")
 	if err != nil {
-		return models.ResponseBody{}, err
+		// wrap error with request body so callers (and logs) can inspect what was sent
+		return models.ResponseBody{}, fmt.Errorf("%w request=%s", err, string(jsonBody))
 	}
 	var response models.ResponseBody
 	err = json.Unmarshal(respBody, &response)

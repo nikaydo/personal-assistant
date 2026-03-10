@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/nikaydo/personal-assistant/internal/logg"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
@@ -42,7 +43,7 @@ func fakeResponse(fn string, args string) models.ResponseBody {
 }
 
 func TestRunTool_CommandExec(t *testing.T) {
-	agent := Agent{}
+	agent := Agent{Logger: logg.InitLogger()}
 	resp := fakeResponse("command", "pwd")
 	out, stop, err := agent.RunTool(resp)
 	if err != nil {
@@ -57,7 +58,7 @@ func TestRunTool_CommandExec(t *testing.T) {
 }
 
 func TestRunTool_CommandJSON(t *testing.T) {
-	agent := Agent{}
+	agent := Agent{Logger: logg.InitLogger()}
 	payload := map[string]any{"command": "pwd", "args": []string{}}
 	b, _ := json.Marshal(payload)
 	resp := fakeResponse("command", string(b))
@@ -67,5 +68,38 @@ func TestRunTool_CommandJSON(t *testing.T) {
 	}
 	if out == "" {
 		t.Error("expected non-empty output for json form")
+	}
+}
+
+func TestHistorySanitization_EmptyThoughts(t *testing.T) {
+	agent := Agent{Logger: logg.InitLogger(), History: &[]models.Message{}}
+
+	// initial thought (empty) should be replaced, and CollectContext should likewise
+	r := AgentResponse{Thought: ""}
+	// mimic initial append logic
+	safeThought := r.Thought
+	if safeThought == "" {
+		safeThought = " "
+	}
+	*agent.History = append(*agent.History, models.Message{Role: "assistant", Content: safeThought})
+	if (*agent.History)[0].Content == "" {
+		t.Errorf("initial thought was not sanitized")
+	}
+
+	// now test CollectContext with an empty thought
+	body := fakeResponse("foo", `{"thought":""}`)
+	// also need to simulate a tool call structure expected by CollectContext
+	body.Choices[0].Message.ToolCalls = []models.ToolCall{{
+		Function: models.ToolFunction{Name: "foo", Arguments: "{}"},
+		ID:       "id",
+		Type:     "type",
+	}}
+	// run CollectContext
+	if err := agent.CollectContext(body, "output"); err != nil {
+		t.Fatalf("CollectContext error: %v", err)
+	}
+	last := (*agent.History)[len(*agent.History)-1]
+	if last.Content == "" {
+		t.Errorf("CollectContext appended empty content")
 	}
 }

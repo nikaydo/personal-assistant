@@ -62,9 +62,8 @@ func (l *Logger) WithModule(module string) *Logger {
 	}
 }
 
-func (l *Logger) Task(t string, msg ...any) {
+func (l *Logger) Task(msg ...any) {
 	message, attrs := normalizeLogArgs(msg...)
-	attrs = append(attrs, slog.String("type", t))
 	l.Customlogger.LogAttrs(context.Background(), slog.Level(TaskLevel), message, attrs...)
 }
 

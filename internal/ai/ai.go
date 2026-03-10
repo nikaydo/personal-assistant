@@ -34,7 +34,8 @@ func Init(config config.Config, aiLog *logg.Logger, db *database.Database) *Ai {
 	queueLog := aiLog.WithModule("QUEUE")
 	queue := llmcalls.NewQueue(config, 64, queueLog)
 	queue.QueueStart()
-	agent := agent.Agent{Steps: 10, Model: config.ModelOpenRouter[0], Queue: queue, Dbase: db, Cfg: config}
+	agentLogger := aiLog.WithModule("AGENT")
+	agent := agent.Agent{Steps: 10, Model: config.ModelOpenRouter[0], Queue: queue, Dbase: db, Cfg: config, Logger: agentLogger, History: &[]models.Message{}}
 	mem := &memory.Memory{
 		DBase:        db,
 		Cfg:          config,
