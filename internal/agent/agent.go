@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/database"
@@ -71,7 +72,9 @@ func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
 		Role:    "assistant",
 		Content: safeThought})
 
-	for range a.Steps {
+	// run a fixed number of steps rather than iterating over an integer value
+	for i := range a.Steps {
+		a.Logger.Info("agent iteration", "step", i)
 		respLLM, err := a.AskLLM("auto")
 		if err != nil {
 			a.Logger.Error("AskLLM failed", "error", err)
@@ -101,7 +104,8 @@ func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
 			a.Logger.Error("CollectContext failed", "error", err)
 			return models.ResponseBody{}, err
 		}
-		a.Logger.Info("RunTool: ", a.History)
+		// log history snapshot for debugging loops
+		a.Logger.Info("History after step", "count", len(*a.History))
 	}
 	return models.ResponseBody{}, errors.New("wtf")
 }
@@ -118,8 +122,8 @@ func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
 			svc := command.NewService()
 			out, err := svc.ExecuteFromLLM(i.Function.Arguments)
 			if err != nil {
-				a.Logger.Error("command execution failed", "error", err)
-				return "", false, err
+				a.Logger.Warn("command execution failed", "error", err)
+				return err.Error(), false, nil
 			}
 			return out, false, nil
 		case "stop":
@@ -186,6 +190,8 @@ func (a *Agent) CollectContext(body models.ResponseBody, funcOutput string) erro
 	tool := body.Choices[0].Message.ToolCalls[0]
 
 	if data.Name != "reasoning" {
+		// put actual output (and arguments) into the content so the LLM can see
+		content := fmt.Sprintf("args: %s\noutput: %s", data.Args, funcOutput)
 		*a.History = append(*a.History,
 			models.Message{
 				Role:      "function",
@@ -194,18 +200,22 @@ func (a *Agent) CollectContext(body models.ResponseBody, funcOutput string) erro
 				Name:      data.Name,
 				Arguments: data.Args,
 				Output:    funcOutput,
-				Content:   "call input and output",
+				Content:   content,
 			},
 		)
 	}
 
-	if args.Thought != "" {
-		*a.History = append(*a.History,
-			models.Message{
-				Role:    "assistant",
-				Content: args.Thought},
-		)
+	// always append the assistant thought, substituting a space if it's empty
+	thought := args.Thought
+	if thought == "" {
+		thought = " "
 	}
+	*a.History = append(*a.History,
+		models.Message{
+			Role:    "assistant",
+			Content: thought,
+		},
+	)
 
 	return nil
 }

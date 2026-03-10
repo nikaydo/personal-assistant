@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/nikaydo/personal-assistant/internal/logg"
@@ -102,4 +103,27 @@ func TestHistorySanitization_EmptyThoughts(t *testing.T) {
 	if last.Content == "" {
 		t.Errorf("CollectContext appended empty content")
 	}
+}
+
+func TestCollectContext_IncludesOutput(t *testing.T) {
+	agent := Agent{Logger: logg.InitLogger(), History: &[]models.Message{}}
+	body := fakeResponse("command", "{\"command\":\"pwd\"}")
+	body.Choices[0].Message.ToolCalls[0].ID = "x"
+	body.Choices[0].Message.ToolCalls[0].Type = "cmd"
+
+	if err := agent.CollectContext(body, "dir123"); err != nil {
+		t.Fatalf("CollectContext failed: %v", err)
+	}
+	if len(*agent.History) < 2 {
+		t.Fatalf("history too short: %v", *agent.History)
+	}
+	funcMsg := (*agent.History)[len(*agent.History)-2]
+	if !containsSubstring(funcMsg.Content, "dir123") {
+		t.Errorf("expected output in function message content, got %q", funcMsg.Content)
+	}
+}
+
+// helper for the previous test
+func containsSubstring(s, sub string) bool {
+	return strings.Contains(s, sub)
 }

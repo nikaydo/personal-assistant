@@ -36,7 +36,8 @@ func (a *Agent) DetectChosenTool(body models.ResponseBody, SystemMemory *models.
 		}
 		return resp, nil
 	case "agent_mode":
-		a.Run(body)
+		return a.Run(body)
+
 	}
 	return models.ResponseBody{}, fmt.Errorf("unknown function: %s", FuncName)
 }
