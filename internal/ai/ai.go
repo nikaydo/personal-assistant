@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/nikaydo/personal-assistant/internal/agent"
 	"github.com/nikaydo/personal-assistant/internal/ai/memory"
-	"github.com/nikaydo/personal-assistant/internal/ai/tools"
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/database"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
@@ -19,9 +19,9 @@ type Ai struct {
 	Model     []string
 	ModelData []models.Model
 
-	Tools tools.Tool
-
 	Memory *memory.Memory
+
+	Agent agent.Agent
 
 	Queue *llmcalls.Queue
 
@@ -34,12 +34,12 @@ func Init(config config.Config, aiLog *logg.Logger, db *database.Database) *Ai {
 	queueLog := aiLog.WithModule("QUEUE")
 	queue := llmcalls.NewQueue(config, 64, queueLog)
 	queue.QueueStart()
-	tools := tools.Tool{Dbase: db, Cfg: config, Queue: queue, Model: config.ModelOpenRouter[0]}
+	agent := agent.Agent{Steps: 10, Model: config.ModelOpenRouter[0], Queue: queue, Dbase: db, Cfg: config}
 	mem := &memory.Memory{
 		DBase:        db,
 		Cfg:          config,
 		Logger:       aiLog,
-		Tools:        tools,
+		Agent:        agent,
 		SystemMemory: &models.SystemSettings{},
 		ToolsMemory:  &[]models.ToolsHistory{},
 		Tokens: memory.ContextTokens{
@@ -53,9 +53,9 @@ func Init(config config.Config, aiLog *logg.Logger, db *database.Database) *Ai {
 
 	return &Ai{
 		Queue:  queue,
-		Tools:  tools,
 		Memory: mem,
 		Config: config,
+		Agent:  agent,
 		Logger: aiLog,
 	}
 }

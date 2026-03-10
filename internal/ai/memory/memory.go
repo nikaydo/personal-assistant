@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nikaydo/personal-assistant/internal/ai/tools"
+	"github.com/nikaydo/personal-assistant/internal/agent"
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/database"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
@@ -40,8 +40,7 @@ type Memory struct {
 	//краткосрочная память
 	ShortTerm []models.History
 
-	Tools tools.Tool
-
+	Agent  agent.Agent
 	Tokens ContextTokens
 
 	DBase *database.Database

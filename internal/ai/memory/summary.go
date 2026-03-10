@@ -3,7 +3,7 @@ package memory
 import (
 	"strings"
 
-	"github.com/nikaydo/personal-assistant/internal/ai/tools"
+	"github.com/nikaydo/personal-assistant/internal/agent"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
@@ -12,7 +12,7 @@ var enqueueSummaryFn = func(q *llmcalls.Queue, item llmcalls.QueueItem) (models.
 	return q.AddToQueue(item)
 }
 
-var detectChosenToolFn = func(t *tools.Tool, body models.ResponseBody) error {
+var detectChosenToolFn = func(t *agent.Agent, body models.ResponseBody) error {
 	_, err := t.DetectChosenTool(body, nil, nil, []models.Message{})
 	return err
 }
@@ -56,12 +56,12 @@ func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
 		Model:       model,
 		Messages:    msg,
 		ToolsChoise: "required",
-		Tools:       tools.GetToolLongTerm(),
+		Tools:       agent.GetToolLongTerm(),
 	}})
 	if err != nil {
 		return err
 	}
-	if err := detectChosenToolFn(&m.Tools, respLLM); err != nil {
+	if err := detectChosenToolFn(&m.Agent, respLLM); err != nil {
 		return err
 	}
 

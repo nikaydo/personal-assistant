@@ -38,7 +38,7 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 	if len(msgChoice.ToolCalls) > 0 {
 		ai.Logger.Task("Found tool in response", respLLM)
 		// pass pointer to the system memory field so it can be created/updated
-		resp, err := ai.Tools.DetectChosenTool(respLLM, ai.Memory.SystemMemory, ai.Memory.ToolsMemory, history)
+		resp, err := ai.Agent.DetectChosenTool(respLLM, ai.Memory.SystemMemory, ai.Memory.ToolsMemory, history)
 		if err != nil {
 			return mod.ResponseBody{}, err
 		}

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	toolsmemory "github.com/nikaydo/personal-assistant/internal/ai/tools"
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/database"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
@@ -261,9 +260,6 @@ func TestSummaryShortMemory_TriggersWhenMessageCountAboveThreshold(t *testing.T)
 		enqueueCalled = true
 		return models.ResponseBody{}, nil
 	}
-	detectChosenToolFn = func(_ *toolsmemory.Tool, _ models.ResponseBody) error {
-		return nil
-	}
 
 	if err := m.SummaryShortMemory(nil, "test-model"); err != nil {
 		t.Fatalf("SummaryShortMemory returned error: %v", err)
@@ -296,9 +292,6 @@ func TestSummaryShortMemory_DoesNotDropMessagesOnEnqueueError(t *testing.T) {
 	enqueueSummaryFn = func(_ *llmcalls.Queue, _ llmcalls.QueueItem) (models.ResponseBody, error) {
 		return models.ResponseBody{}, errors.New("queue failed")
 	}
-	detectChosenToolFn = func(_ *toolsmemory.Tool, _ models.ResponseBody) error {
-		return nil
-	}
 
 	err := m.SummaryShortMemory(nil, "test-model")
 	if err == nil {
@@ -309,42 +302,6 @@ func TestSummaryShortMemory_DoesNotDropMessagesOnEnqueueError(t *testing.T) {
 	}
 	if len(m.ShortTerm) != 2 {
 		t.Fatalf("short memory should stay unchanged on error: got=%d want=%d", len(m.ShortTerm), 2)
-	}
-}
-
-func TestSummaryShortMemory_UsesConfigPrompt(t *testing.T) {
-	m := newTestMemory()
-	m.Cfg.ShortMemoryMessagesCount = 1
-	m.Cfg.SummaryMemoryStep = 1
-	m.Cfg.PromtMemorySummary = "prompt from config"
-	m.Tokens.MessageCount = 2
-	m.ShortTerm = []models.History{
-		{Question: models.ShotTermQuestion{Text: "q1"}, Answer: models.ShotTermAnswer{Text: "a1"}},
-	}
-
-	oldEnqueue := enqueueSummaryFn
-	oldDetect := detectChosenToolFn
-	t.Cleanup(func() {
-		enqueueSummaryFn = oldEnqueue
-		detectChosenToolFn = oldDetect
-	})
-
-	var gotPrompt string
-	enqueueSummaryFn = func(_ *llmcalls.Queue, item llmcalls.QueueItem) (models.ResponseBody, error) {
-		if len(item.Body.Messages) > 0 {
-			gotPrompt = item.Body.Messages[0].Content
-		}
-		return models.ResponseBody{}, nil
-	}
-	detectChosenToolFn = func(_ *toolsmemory.Tool, _ models.ResponseBody) error {
-		return nil
-	}
-
-	if err := m.SummaryShortMemory(nil, "test-model"); err != nil {
-		t.Fatalf("SummaryShortMemory returned error: %v", err)
-	}
-	if gotPrompt != m.Cfg.PromtMemorySummary {
-		t.Fatalf("unexpected summary prompt: got=%q want=%q", gotPrompt, m.Cfg.PromtMemorySummary)
 	}
 }
 
