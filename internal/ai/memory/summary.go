@@ -61,8 +61,12 @@ func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
 	if err != nil {
 		return err
 	}
-	if err := detectChosenToolFn(&m.Agent, respLLM); err != nil {
-		return err
+	if len(respLLM.Choices) > 0 && len(respLLM.Choices[0].Message.ToolCalls) > 0 {
+		if err := detectChosenToolFn(&m.Agent, respLLM); err != nil {
+			return err
+		}
+	} else {
+		m.Logger.Memory("SummaryShortMemory: no tool calls in summarization response, skipping tool execution")
 	}
 
 	m.mu.Lock()

@@ -8,7 +8,7 @@ func GetAgentTool() []models.Tool {
 			Type: "function",
 			Function: models.Function{
 				Name:        "reasoning",
-				Description: "Reasoning agent mode and perform an action",
+				Description: "Reason about the next step and optionally perform an action",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -29,6 +29,7 @@ func GetAgentTool() []models.Tool {
 									"additionalProperties": true,
 								},
 							},
+							"required": []string{"function"},
 						},
 					},
 					"required": []string{"thought"},
@@ -62,7 +63,7 @@ func GetAgentTool() []models.Tool {
 					"properties": map[string]any{
 						"command": map[string]any{
 							"type":        "string",
-							"description": "Command name like pwd, cd, ls and etc",
+							"description": "Command name like pwd, cd, ls with args",
 						},
 						"args": map[string]any{
 							"type":        "array",
@@ -116,7 +117,7 @@ func GetToolLongTerm() []models.Tool {
 			Type: "function",
 			Function: models.Function{
 				Name:        "change_agent_settings",
-				Description: "A function for creating a short summary of a text based on its category, purpose, and importance.",
+				Description: "Update agent personalization settings.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -178,7 +179,7 @@ func GetToolDefault() []models.Tool {
 			Type: "function",
 			Function: models.Function{
 				Name:        "change_agent_settings",
-				Description: "Fucktion for change agent persoanalization.",
+				Description: "Update agent personalization settings.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -239,6 +240,10 @@ func GetToolDefault() []models.Tool {
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{
+						"question": map[string]any{
+							"type":        "string",
+							"description": "Original user request to solve",
+						},
 						"thought": map[string]any{
 							"type":        "string",
 							"description": "Internal reasoning step explaining what the agent plans to do next",

@@ -1,12 +1,12 @@
 package ai
 
 import (
-	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
 
+	"github.com/nikaydo/personal-assistant/internal/agent"
 	"github.com/nikaydo/personal-assistant/internal/ai/memory"
 	"github.com/nikaydo/personal-assistant/internal/config"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
@@ -87,8 +87,9 @@ func TestGetModelData_ReturnsErrorWhenNoModelsMatched(t *testing.T) {
 	}
 }
 
-func TestMakeAsk_ReturnsNotImplementedOnToolCalls(t *testing.T) {
+func TestMakeAsk_HandlesToolCalls(t *testing.T) {
 	oldAdd := addToQueueFn
+	oldDetect := detectChosenToolFn
 	addToQueueFn = func(q *llmcalls.Queue, item llmcalls.QueueItem) (models.ResponseBody, error) {
 		return models.ResponseBody{
 			Choices: []models.Choices{
@@ -99,8 +100,8 @@ func TestMakeAsk_ReturnsNotImplementedOnToolCalls(t *testing.T) {
 								ID:   "tc-1",
 								Type: "function",
 								Function: models.ToolFunction{
-									Name:      "summarize",
-									Arguments: "{}",
+									Name:      "agent_mode",
+									Arguments: "{\"thought\":\"x\"}",
 								},
 							},
 						},
@@ -109,15 +110,30 @@ func TestMakeAsk_ReturnsNotImplementedOnToolCalls(t *testing.T) {
 			},
 		}, nil
 	}
+	detectChosenToolFn = func(_ *agent.Agent, _ models.ResponseBody, _ *models.SystemSettings, _ *[]models.ToolsHistory, _ []models.Message) (models.ResponseBody, error) {
+		return models.ResponseBody{
+			Choices: []models.Choices{
+				{
+					Message: models.Message{
+						Content: "ok",
+					},
+				},
+			},
+		}, nil
+	}
 	t.Cleanup(func() {
 		addToQueueFn = oldAdd
+		detectChosenToolFn = oldDetect
 	})
 
 	ai := newTestAI(config.Config{})
 	ai.Model = []string{"test-model"}
-	_, err := ai.MakeAsk("hello", nil)
-	if !errors.Is(err, ErrToolCallsNotImplemented) {
-		t.Fatalf("expected ErrToolCallsNotImplemented, got %v", err)
+	resp, err := ai.MakeAsk("hello", nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.Choices[0].Message.Content != "ok" {
+		t.Fatalf("unexpected content: %q", resp.Choices[0].Message.Content)
 	}
 }
 

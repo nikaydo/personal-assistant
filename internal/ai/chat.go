@@ -1,14 +1,21 @@
 package ai
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 
+	"github.com/nikaydo/personal-assistant/internal/agent"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
 	mod "github.com/nikaydo/personal-assistant/internal/models"
 )
 
 var addToQueueFn = func(q *llmcalls.Queue, item llmcalls.QueueItem) (mod.ResponseBody, error) {
 	return q.AddToQueue(item)
+}
+
+var detectChosenToolFn = func(a *agent.Agent, body mod.ResponseBody, system *mod.SystemSettings, tools *[]mod.ToolsHistory, msg []mod.Message) (mod.ResponseBody, error) {
+	return a.DetectChosenTool(body, system, tools, msg)
 }
 
 func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
@@ -36,14 +43,57 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 	}
 
 	if len(msgChoice.ToolCalls) > 0 {
-		ai.Logger.Task("Found tool in response", respLLM)
-		// pass pointer to the system memory field so it can be created/updated
-		resp, err := ai.Agent.DetectChosenTool(respLLM, ai.Memory.SystemMemory, ai.Memory.ToolsMemory, history)
+		ai.Logger.Task("Found tool in response, handling tool calls in chat flow", respLLM)
+
+		// ensure agent is wired up with the current runtime context
+		if ai.Agent.Queue == nil {
+			ai.Agent.Queue = ai.Queue
+		}
+		if ai.Agent.Logger == nil {
+			ai.Agent.Logger = ai.Logger
+		}
+		if ai.Agent.History == nil {
+			ai.Agent.History = &[]mod.Message{}
+		}
+		if ai.Agent.Model == "" && len(ai.Model) > 0 {
+			ai.Agent.Model = ai.Model[0]
+		}
+		if ai.Agent.SystemPrompt == "" {
+			ai.Agent.SystemPrompt = ai.Config.PromtSystemAgent
+		}
+		if ai.Agent.Cfg.ApiKeyOpenrouter == "" {
+			ai.Agent.Cfg = ai.Config
+		}
+		if ai.Agent.Dbase == nil {
+			ai.Agent.Dbase = ai.Memory.DBase
+		}
+
+		// seed agent history with the question when agent_mode doesn't include it
+		firstTool := msgChoice.ToolCalls[0]
+		if firstTool.Function.Name == "agent_mode" {
+			*ai.Agent.History = []mod.Message{}
+			var payload struct {
+				Question string `json:"question"`
+			}
+			_ = json.Unmarshal([]byte(firstTool.Function.Arguments), &payload)
+			if payload.Question == "" && q != "" {
+				*ai.Agent.History = append(*ai.Agent.History, mod.Message{Role: "user", Content: q})
+			}
+		}
+
+		respLLM, err = detectChosenToolFn(&ai.Agent, respLLM, ai.Memory.SystemMemory, ai.Memory.ToolsMemory, history)
 		if err != nil {
+			ai.Logger.Error("MakeAsk: tool call handling failed:", err)
 			return mod.ResponseBody{}, err
 		}
-		ai.Logger.Task("DetectChosenTool:", resp, "Response:", resp)
-		return resp, nil
+		if len(respLLM.Choices) == 0 {
+			return mod.ResponseBody{}, errors.New("tool call produced empty response")
+		}
+		msgChoice, err = firstChoice(respLLM)
+		if err != nil {
+			ai.Logger.Error("MakeAsk: firstChoice failed after tool handling:", err)
+			return mod.ResponseBody{}, err
+		}
 	}
 
 	if msgChoice.Content == "" {

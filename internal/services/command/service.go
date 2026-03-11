@@ -42,7 +42,7 @@ func (s *Service) ExecuteFromLLM(raw string) (string, error) {
 	if IsBlocked(cmdName) {
 		return "", errors.New("command blocked")
 	}
-	return s.cmd.Exec(cmdName, strings.Join(args, " "))
+	return s.cmd.Exec(cmdName, args)
 }
 
 // parse decodes the raw input into a command name and argument slice.

@@ -40,11 +40,19 @@ func (m *Memory) resolveStatePath(path string) string {
 func (m *Memory) snapshotState() State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	system := models.SystemSettings{}
+	if m.SystemMemory != nil {
+		system = *m.SystemMemory
+	}
+	tools := []models.ToolsHistory{}
+	if m.ToolsMemory != nil {
+		tools = append(tools, (*m.ToolsMemory)...)
+	}
 	state := State{
 		Version:      stateVersion,
 		UpdatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-		SystemMemory: *m.SystemMemory,
-		ToolsMemory:  append([]models.ToolsHistory(nil), *m.ToolsMemory...),
+		SystemMemory: system,
+		ToolsMemory:  tools,
 		ShortTerm:    append([]models.History(nil), m.ShortTerm...),
 		MessageCount: m.Tokens.MessageCount,
 		ContextCoeff: m.Tokens.ContextCoeffSnapshot(),
@@ -55,6 +63,12 @@ func (m *Memory) snapshotState() State {
 func (m *Memory) applyState(state State) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.SystemMemory == nil {
+		m.SystemMemory = &models.SystemSettings{}
+	}
+	if m.ToolsMemory == nil {
+		m.ToolsMemory = &[]models.ToolsHistory{}
+	}
 	*m.SystemMemory = state.SystemMemory
 	*m.ToolsMemory = append([]models.ToolsHistory(nil), state.ToolsMemory...)
 	m.ShortTerm = append([]models.History(nil), state.ShortTerm...)
