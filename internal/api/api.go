@@ -29,20 +29,17 @@ type Addr struct {
 }
 
 func SetupApi(config config.Config, log *logg.Logger) (API, error) {
-	apiLog := log.WithModule("API")
-	dbLog := log.WithModule("DB")
-	aiLog := log.WithModule("AI")
 
-	apiLog.Info("Initializing integrations")
+	log.WithModule("API").Info("Initializing integrations")
 
-	dbLog.Info("Initializing database client")
+	log.WithModule("DB").Info("Initializing database client")
 	db, err := database.InitDB(&config)
 	if err != nil {
 		return API{}, err
 	}
 
-	dbLog.Info("Database index ready")
-	apiLog.Info("Core services initialized")
+	log.WithModule("DB").Info("Database index ready")
+	log.WithModule("API").Info("Core services initialized")
 
 	a := API{
 		Addr: &Addr{
@@ -50,7 +47,7 @@ func SetupApi(config config.Config, log *logg.Logger) (API, error) {
 			Port: strconv.Itoa(config.ApiPort),
 		},
 		Router: chi.NewRouter(),
-		Ai:     ai.Init(config, aiLog, db),
+		Ai:     ai.Init(config, log.WithModule("AI"), db),
 	}
 
 	return a, nil

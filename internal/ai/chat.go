@@ -23,7 +23,7 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 	if err != nil {
 		ai.Logger.Error("MakeAsk: ask request failed:", err)
 		return mod.ResponseBody{}, err
-	} 
+	}
 	if respLLM.Error.Message != "" {
 		ai.Logger.Error(respLLM.Error)
 		return mod.ResponseBody{}, fmt.Errorf("error: %s", respLLM.Error.Message)
@@ -42,7 +42,7 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 		if err != nil {
 			return mod.ResponseBody{}, err
 		}
-		ai.Logger.Task("DetectChosenTool:", respLLM, "Response:", resp)
+		ai.Logger.Task("DetectChosenTool:", resp, "Response:", resp)
 		return resp, nil
 	}
 

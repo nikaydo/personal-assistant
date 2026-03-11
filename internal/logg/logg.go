@@ -18,6 +18,7 @@ var (
 	QuestionLevel = 1
 	ErrorLevel    = 2
 	MemoryLevel   = 3
+	AgentLevel    = 5
 )
 
 type teeWriter struct {
@@ -49,6 +50,7 @@ type ColorHandler struct {
 
 type Logger struct {
 	Customlogger *slog.Logger
+	Mode         string
 }
 
 func (l *Logger) WithModule(module string) *Logger {
@@ -60,6 +62,11 @@ func (l *Logger) WithModule(module string) *Logger {
 	return &Logger{
 		Customlogger: l.Customlogger.With(slog.String("module", module)),
 	}
+}
+
+func (l *Logger) Agent(msg ...any) {
+	message, attrs := normalizeLogArgs(msg...)
+	l.Customlogger.LogAttrs(context.Background(), slog.Level(AgentLevel), message, attrs...)
 }
 
 func (l *Logger) Task(msg ...any) {
@@ -204,6 +211,8 @@ func levelName(level slog.Level) string {
 		return "ERROR"
 	case level == slog.Level(MemoryLevel):
 		return "MEMORY"
+	case level == slog.Level(AgentLevel):
+		return "AGENT"
 	default:
 		return "DEBUG"
 	}
@@ -225,6 +234,8 @@ func colorLevel(level string, slogLevel slog.Level) string {
 		return "\x1b[31m" + level + "\x1b[0m"
 	case slogLevel == slog.Level(MemoryLevel):
 		return "\x1b[96m" + level + "\x1b[0m"
+	case slogLevel == slog.Level(AgentLevel):
+		return "\x1b[30m" + level + "\x1b[0m"
 	default:
 		return "\x1b[90m" + level + "\x1b[0m"
 	}

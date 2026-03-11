@@ -26,10 +26,6 @@ type Agent struct {
 
 	Logger *logg.Logger
 
-	// optional system prompt that will be prepended to history when
-	// the agent calls the LLM.  This allows a different instruction set
-	// while the agent is reasoning and using tools.  The value is usually
-	// taken from configuration (see `PromtSystemAgent`).
 	SystemPrompt string
 
 	History *[]models.Message
@@ -61,7 +57,7 @@ func parseAgentResponse(body models.ResponseBody) (AgentResponse, error) {
 }
 
 func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
-	a.Logger.Info("Agent.Run called", "initial_tool", body.Choices[0].Message.ToolCalls[0].Function.Name)
+	a.Logger.Agent("Agent.Run called", "initial_tool", body.Choices[0].Message.ToolCalls[0].Function.Name)
 	r, err := parseAgentResponse(body)
 	if err != nil {
 		a.Logger.Error("parseAgentResponse failed", "error", err)
@@ -78,20 +74,20 @@ func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
 
 	// run a fixed number of steps rather than iterating over an integer value
 	for i := range a.Steps {
-		a.Logger.Info("agent iteration", "step", i)
+		a.Logger.Agent("agent iteration", "step", i)
 		respLLM, err := a.AskLLM("auto")
 		if err != nil {
 			a.Logger.Error("AskLLM failed", "error", err)
 		}
-		a.Logger.Info("AskLLM: ", respLLM)
+		a.Logger.Agent("AskLLM: ", respLLM)
 		out, stop, err := a.RunTool(respLLM)
 		if err != nil {
 			a.Logger.Error("RunTool failed", "error", err)
 
 		}
-		a.Logger.Info("RunTool: ", out)
+		a.Logger.Agent("RunTool: ", out)
 		if stop {
-			a.Logger.Info("agent stopping")
+			a.Logger.Agent("agent stopping")
 			*a.History = append(*a.History, models.Message{
 				Role:      "function",
 				ID:        respLLM.Choices[0].Message.ID,
@@ -107,19 +103,19 @@ func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
 			a.Logger.Error("CollectContext failed", "error", err)
 		}
 		// log history snapshot for debugging loops
-		a.Logger.Info("History after step", "count", len(*a.History))
+		a.Logger.Agent("History after step", "count", len(*a.History))
 	}
 	return models.ResponseBody{}, errors.New("limit of steps")
 }
 
 func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
 	for _, i := range body.Choices[0].Message.ToolCalls {
-		a.Logger.Info("RunTool processing", "tool", i.Function.Name)
+		a.Logger.Agent("RunTool processing", "tool", i.Function.Name)
 		switch i.Function.Name {
 		case "reasoning":
 			return "", false, nil
 		case "command":
-			a.Logger.Info("executing command", "args", i.Function.Arguments)
+			a.Logger.Agent("executing command", "args", i.Function.Arguments)
 			// use command service directly for simple invocation
 			svc := command.NewService()
 			out, err := svc.ExecuteFromLLM(i.Function.Arguments)
@@ -143,7 +139,7 @@ func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
 }
 
 func (a *Agent) RunFunc(args AgentResponse) (string, error) {
-	a.Logger.Info("RunFunc called", "function", args.Func.Function)
+	a.Logger.Agent("RunFunc called", "function", args.Func.Function)
 	switch args.Func.Function {
 	case "command":
 		// delegate to the command service which knows how to interpret

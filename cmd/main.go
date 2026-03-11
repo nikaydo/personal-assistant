@@ -16,39 +16,35 @@ import (
 
 func main() {
 	l := logg.InitLogger()
-	systemLog := l.WithModule("SYSTEM")
-	apiLog := l.WithModule("API")
-	aiLog := l.WithModule("AI")
-
-	systemLog.Info("Starting application")
+	l.WithModule("SYSTEM").Info("Starting application")
 	config, err := config.ConfigRead("./settings.json")
 	if err != nil {
-		systemLog.Error("Failed to read config:", err)
+		l.WithModule("SYSTEM").Error("Failed to read config:", err)
 		return
 	}
-	systemLog.Info("Config loaded")
+	l.WithModule("SYSTEM").Info("Config loaded")
 
-	api, err := api.SetupApi(*config, apiLog)
+	api, err := api.SetupApi(*config, l.WithModule("API"))
 	if err != nil {
-		apiLog.Error("Failed to setup api:", err)
+		l.WithModule("API").Error("Failed to setup api:", err)
 		return
 	}
-	apiLog.Info(fmt.Sprintf("Server configured on addr %s:%d", config.ApiHost, config.ApiPort))
+	l.WithModule("API").Info(fmt.Sprintf("Server configured on addr %s:%d", config.ApiHost, config.ApiPort))
 
-	aiLog.Info("Loading model metadata")
+	l.WithModule("AI").Info("Loading model metadata")
 	if err := api.Ai.GetModelData(); err != nil {
-		aiLog.Error("Failed to load model metadata:", err)
+		l.WithModule("AI").Error("Failed to load model metadata:", err)
 		return
 	}
-	aiLog.Info(fmt.Sprintf("Context length: %d", api.Ai.Memory.Tokens.ContextLimit))
+	l.WithModule("AI").Info(fmt.Sprintf("Context length: %d", api.Ai.Memory.Tokens.ContextLimit))
 
 	api.Ai.Memory.Tokens.CalculateContextLimit(api.Ai.Config)
 	api.Ai.Logger.Memory("CalculateContextLimit: calculated context limit for each memory type", "system_memory_tokens", api.Ai.Memory.Tokens.SystemMemoryLimit, "user_profile_tokens", api.Ai.Memory.Tokens.UserProfileLimit, "tools_memory_tokens", api.Ai.Memory.Tokens.ToolsMemoryLimit, "long_term_tokens", api.Ai.Memory.Tokens.LongTermLimit, "short_term_tokens", api.Ai.Memory.Tokens.ShortTermLimit)
 
 	api.SetupRoutes()
-	apiLog.Info("Routes setup")
-	systemLog.Info(fmt.Sprintf("Server starting on addr %s:%d", config.ApiHost, config.ApiPort))
-	systemLog.Info("Ready")
+	l.WithModule("API").Info("Routes setup")
+	l.WithModule("SYSTEM").Info(fmt.Sprintf("Server starting on addr %s:%d", config.ApiHost, config.ApiPort))
+	l.WithModule("SYSTEM").Info("Ready")
 
 	startErrCh := make(chan error, 1)
 	go func() {
@@ -61,20 +57,20 @@ func main() {
 	select {
 	case err = <-startErrCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			systemLog.Error("Server start failed:", err)
+			l.WithModule("SYSTEM").Error("Server start failed:", err)
 		}
 		return
 	case <-sigCtx.Done():
 	}
 
-	systemLog.Info("Shutdown requested, stopping services")
+	l.WithModule("SYSTEM").Info("Shutdown requested, stopping services")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := api.Shutdown(shutdownCtx); err != nil {
-		systemLog.Error("Shutdown failed:", err)
+		l.WithModule("SYSTEM").Error("Shutdown failed:", err)
 	}
 
 	if err = <-startErrCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
-		systemLog.Error("Server stopped with error:", err)
+		l.WithModule("SYSTEM").Error("Server stopped with error:", err)
 	}
 }
