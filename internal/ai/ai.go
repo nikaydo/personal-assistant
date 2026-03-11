@@ -35,7 +35,28 @@ func Init(config config.Config, aiLog *logg.Logger, db *database.Database) *Ai {
 	queue := llmcalls.NewQueue(config, 64, queueLog)
 	queue.QueueStart()
 	agentLogger := aiLog.WithModule("AGENT")
-	agent := agent.Agent{Steps: 10, Model: config.ModelOpenRouter[0], Queue: queue, Dbase: db, Cfg: config, Logger: agentLogger, History: &[]models.Message{}}
+	agent := agent.Agent{
+		Steps:        50,
+		Model:        config.ModelOpenRouter[0],
+		Queue:        queue,
+		Dbase:        db,
+		Cfg:          config,
+		Logger:       agentLogger,
+		History:      &[]models.Message{},
+		SystemPrompt: config.PromtSystemAgent, // may be empty
+	}
+	// if the user hasn't provided an explicit agent prompt fall back to a
+	// reasonable default so the model knows it's operating as a reasoning
+	// agent with access to tools.
+	if agent.SystemPrompt == "" {
+		agent.SystemPrompt = "You are an autonomous reasoning agent. " +
+			"When given a task, think step-by-step through how to accomplish it, " +
+			"use available tools by invoking the appropriate function calls, and " +
+			"stop only when you have produced a final response.  Internal reasoning " +
+			"should be returned via the 'reasoning' tool, and the 'stop' tool should " +
+			"carry your final answer.  Do not fabricate information and clearly state " +
+			"uncertainty when it exists."
+	}
 	mem := &memory.Memory{
 		DBase:        db,
 		Cfg:          config,

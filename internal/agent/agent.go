@@ -26,6 +26,10 @@ type Agent struct {
 
 	Logger *logg.Logger
 
+	// optional system prompt that will be prepended to history when
+	// the agent calls the LLM.  This allows a different instruction set
+	// while the agent is reasoning and using tools.  The value is usually
+	// taken from configuration (see `PromtSystemAgent`).
 	SystemPrompt string
 
 	History *[]models.Message
@@ -78,13 +82,12 @@ func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
 		respLLM, err := a.AskLLM("auto")
 		if err != nil {
 			a.Logger.Error("AskLLM failed", "error", err)
-			return models.ResponseBody{}, err
 		}
 		a.Logger.Info("AskLLM: ", respLLM)
 		out, stop, err := a.RunTool(respLLM)
 		if err != nil {
 			a.Logger.Error("RunTool failed", "error", err)
-			return models.ResponseBody{}, err
+
 		}
 		a.Logger.Info("RunTool: ", out)
 		if stop {
@@ -96,18 +99,17 @@ func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
 				Name:      respLLM.Choices[0].Message.ToolCalls[0].Function.Name,
 				Arguments: respLLM.Choices[0].Message.ToolCalls[0].Function.Arguments,
 				Output:    "final",
-				Content:   "call input and output"})
+				Content:   "final response"})
 			return a.AskLLM("none")
 		}
 
 		if err := a.CollectContext(respLLM, out); err != nil {
 			a.Logger.Error("CollectContext failed", "error", err)
-			return models.ResponseBody{}, err
 		}
 		// log history snapshot for debugging loops
 		a.Logger.Info("History after step", "count", len(*a.History))
 	}
-	return models.ResponseBody{}, errors.New("wtf")
+	return models.ResponseBody{}, errors.New("limit of steps")
 }
 
 func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
@@ -133,6 +135,7 @@ func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
 			if err := json.Unmarshal([]byte(body.Choices[0].Message.ToolCalls[0].Function.Arguments), &args); err != nil {
 				return "", false, errors.New("unknown tool")
 			}
+			*a.History = []models.Message{}
 			return "", true, nil
 		}
 	}
@@ -220,7 +223,20 @@ func (a *Agent) CollectContext(body models.ResponseBody, funcOutput string) erro
 	return nil
 }
 
+// AskLLM forwards the current agent history to the LLM queue.  Before the
+// request is enqueued we ensure that the optional system prompt (if set) is
+// present as the first message; this lets the agent operate under a special
+// instruction when running in "agent mode".
 func (a *Agent) AskLLM(ToolsChoise string) (models.ResponseBody, error) {
+	// insert system prompt at the beginning of the history if necessary
+	if a.SystemPrompt != "" {
+		if len(*a.History) == 0 || (*a.History)[0].Role != "system" || (*a.History)[0].Content != a.SystemPrompt {
+			// prepend a copy so we don't mutate the original slice header
+			sys := models.Message{Role: "system", Content: a.SystemPrompt}
+			*a.History = append([]models.Message{sys}, *a.History...)
+		}
+	}
+
 	respLLM, err := a.Queue.AddToQueue(llmcalls.QueueItem{Body: models.RequestBody{
 		Model:       a.Model,
 		Messages:    *a.History,

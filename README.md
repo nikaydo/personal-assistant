@@ -125,6 +125,7 @@ Use one mode at a time.
 ### 4) Memory & prompts
 
 - `promt_system_chat`
+- `promt_system_agent` *(optional)* – instructions used when the AI enters agent/reasoning mode; falls back to a built‑in guideline if unset.
 - `promt_memory_summary`
 - `memory_summary_user_promt`
 - `context_limit`

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
 	"github.com/nikaydo/personal-assistant/internal/logg"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
@@ -120,6 +121,28 @@ func TestCollectContext_IncludesOutput(t *testing.T) {
 	funcMsg := (*agent.History)[len(*agent.History)-2]
 	if !containsSubstring(funcMsg.Content, "dir123") {
 		t.Errorf("expected output in function message content, got %q", funcMsg.Content)
+	}
+}
+
+// verify that a non-empty SystemPrompt is prepended to the history when
+// AskLLM is called.  We don't need the queue to actually succeed; an empty
+// , unstarted queue will return an error, but the history mutation happens
+// before the call, so we can ignore the result.
+func TestAskLLM_AddsSystemPrompt(t *testing.T) {
+	logger := logg.InitLogger()
+	agent := Agent{Logger: logger, History: &[]models.Message{}, Model: "m", SystemPrompt: "agent-prompt"}
+
+	// use a minimal queue instance; it does not need to be started
+	agent.Queue = &llmcalls.Queue{}
+
+	// call AskLLM and intentionally ignore the error
+	_, _ = agent.AskLLM("auto")
+
+	if len(*agent.History) == 0 {
+		t.Fatal("history empty after AskLLM")
+	}
+	if (*agent.History)[0].Role != "system" || (*agent.History)[0].Content != "agent-prompt" {
+		t.Errorf("first history entry wrong: %+v", (*agent.History)[0])
 	}
 }
 

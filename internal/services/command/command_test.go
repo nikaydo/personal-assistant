@@ -31,10 +31,28 @@ func TestService_ExecuteFromLLM_JSON(t *testing.T) {
 	}
 }
 
-func TestService_ExecuteFromLLM_NotAllowed(t *testing.T) {
+func TestService_ExecuteFromLLM_Blocked(t *testing.T) {
+	// temporarily insert a simple blocked command and verify it is
+	// rejected.  "echo" is safe to run, so we use it for this test.
+	blocked["echo"] = struct{}{}
+	defer delete(blocked, "echo")
+
 	svc := NewService()
-	_, err := svc.ExecuteFromLLM("some_unknown_command")
+	_, err := svc.ExecuteFromLLM("echo hello")
 	if err == nil {
-		t.Fatal("expected error for disallowed command")
+		t.Fatal("expected error for blocked command")
+	}
+}
+
+func TestService_ExecuteFromLLM_UnknownAllowed(t *testing.T) {
+	// commands not on the blacklist should pass through, even if they
+	// aren't explicitly blacklisted.  "true" is a trivial builtin.
+	svc := NewService()
+	out, err := svc.ExecuteFromLLM("true")
+	if err != nil {
+		t.Fatalf("unexpected error for allowed command: %v", err)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Errorf("expected empty output from 'true', got %q", out)
 	}
 }

@@ -45,7 +45,9 @@ type Config struct {
 	ApiPort int    `json:"api_port"`
 
 	//Promts
-	PromtSystemChat        string `json:"promt_system_chat"`
+	PromtSystemChat string `json:"promt_system_chat"`
+	// system prompt used specifically when the agent enters reasoning mode.
+	PromtSystemAgent       string `json:"promt_system_agent"`
 	PromtMemorySummary     string `json:"promt_memory_summary"`
 	MemorySummaryUserPromt string `json:"memory_summary_user_promt"`
 }
@@ -103,6 +105,7 @@ func applyEnvOverrides(config *Config) error {
 	}
 
 	config.PromtSystemChat = getEnvString("PROMT_SYSTEM_CHAT", config.PromtSystemChat)
+	config.PromtSystemAgent = getEnvString("PROMT_SYSTEM_AGENT", config.PromtSystemAgent)
 	config.PromtMemorySummary = getEnvString("PROMT_MEMORY_SUMMARY", config.PromtMemorySummary)
 	config.MemorySummaryUserPromt = getEnvString("MEMORY_SUMMARY_USER_PROMT", config.MemorySummaryUserPromt)
 

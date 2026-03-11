@@ -1,203 +1,154 @@
 package command
 
-type CommandSpec struct {
-	Level        string
-	Args         int
-	AllowedFlags map[string]bool
+// blocked contains commands that are explicitly disallowed.  The
+// service will execute anything *not* in this list; a given command is
+// rejected only when it appears here.
+var blocked = map[string]struct{}{
+	// destructive filesystem
+	"rm":        {},
+	"shred":     {},
+	"wipe":      {},
+	"srm":       {},
+	"dd":        {},
+	"truncate":  {},
+	"mkfs":      {},
+	"mkfs.ext4": {},
+	"mkfs.xfs":  {},
+	"mke2fs":    {},
+
+	// powerful disk / partition tools
+	"fdisk":      {},
+	"gdisk":      {},
+	"parted":     {},
+	"lsblk":      {},
+	"blkdiscard": {},
+	"blkid":      {},
+	"losetup":    {},
+	"fdformat":   {},
+
+	// mount / unmount / loop / device nodes
+	"mount":     {},
+	"umount":    {},
+	"mount.nfs": {},
+	"mknod":     {},
+
+	// system / init / power / kernel modules
+	"reboot":    {},
+	"shutdown":  {},
+	"halt":      {},
+	"poweroff":  {},
+	"systemctl": {},
+	"service":   {},
+	"init":      {},
+	"telinit":   {},
+	"modprobe":  {},
+	"insmod":    {},
+	"rmmod":     {},
+	"sysctl":    {},
+
+	// package managers (Arch, Debian, RedHat, etc.)
+	"pacman":  {},
+	"apt":     {},
+	"apt-get": {},
+	"dnf":     {},
+	"yum":     {},
+	"zypper":  {},
+	"rpm":     {},
+	"emerge":  {},
+
+	// privileged user management
+	"sudo":     {},
+	"su":       {},
+	"useradd":  {},
+	"userdel":  {},
+	"usermod":  {},
+	"groupadd": {},
+	"groupdel": {},
+	"passwd":   {},
+
+	// networking / firewall / tunneling / scanners
+	"iptables":  {},
+	"ip6tables": {},
+	"nft":       {},
+	"ip":        {},
+	"ifconfig":  {},
+	"route":     {},
+	"tc":        {},
+	"iw":        {},
+	"iwconfig":  {},
+	"nmcli":     {},
+	"nmap":      {},
+	"nc":        {}, // netcat
+	"netcat":    {},
+	"socat":     {},
+	"ssh":       {}, // raw ssh executables — prefer controlled wrappers if needed
+	"scp":       {},
+	"rsync":     {},
+
+	// raw download/execution utilities — prefer controlled http_get/download wrapper
+	"curl":  {},
+	"wget":  {},
+	"fetch": {},
+
+	// container / virtualization / orchestration
+	"docker":   {},
+	"podman":   {},
+	"runc":     {},
+	"kubectl":  {},
+	"crictl":   {},
+	"lxc":      {},
+	"virsh":    {},
+	"qemu-img": {},
+
+	// interpreters and shells (prevent arbitrary script execution)
+	"bash":    {},
+	"sh":      {},
+	"zsh":     {},
+	"dash":    {},
+	"python":  {},
+	"python3": {},
+	"perl":    {},
+	"ruby":    {},
+	"node":    {},
+	"php":     {},
+
+	// build / system tools that can be misused
+	"make":  {},
+	"gcc":   {},
+	"g++":   {},
+	"strip": {},
+
+	// crypto / key tools (can expose/private-key ops)
+	"openssl": {},
+	"gpg":     {},
+
+	// database servers / clients (could expose/modify data)
+	"mysql":     {},
+	"mysqld":    {},
+	"psql":      {},
+	"mongo":     {},
+	"redis-cli": {},
+
+	// low-level system utilities
+	"chattr":  {},
+	"fuser":   {},
+	"kill":    {},
+	"killall": {},
+
+	// other potentially dangerous utilities
+	"echo": {},
+	">":    {},
 }
 
-// IsAllowed reports whether the provided command name appears in the
-// global whitelist.  It is used by the service to reject requests from
-// the language model that try to execute something outside the
-// permitted set.
-func IsAllowed(cmd string) bool {
-	_, ok := allowed[cmd]
+// IsBlocked reports whether the provided command name appears in the
+// blacklist.
+func IsBlocked(cmd string) bool {
+	_, ok := blocked[cmd]
 	return ok
 }
 
-var allowed = map[string]CommandSpec{
-
-	// navigation / session
-	"pwd": {
-		Level: "read",
-		Args:  0,
-	},
-
-	"cd": {
-		Level: "session",
-		Args:  1,
-	},
-
-	// file listing
-	"ls": {
-		Level: "read",
-		Args:  1,
-		AllowedFlags: map[string]bool{
-			"-l": true,
-			"-a": true,
-			"-h": true,
-			"-1": true,
-		},
-	},
-
-	"stat": {
-		Level: "read",
-		Args:  1,
-	},
-
-	// file read
-	"cat": {
-		Level: "read",
-		Args:  1,
-	},
-
-	"head": {
-		Level: "read",
-		Args:  1,
-		AllowedFlags: map[string]bool{
-			"-n": true,
-		},
-	},
-
-	"tail": {
-		Level: "read",
-		Args:  1,
-		AllowedFlags: map[string]bool{
-			"-n": true,
-		},
-	},
-
-	// directory operations
-	"mkdir": {
-		Level: "write",
-		Args:  1,
-		AllowedFlags: map[string]bool{
-			"-p": true,
-		},
-	},
-
-	"rmdir": {
-		Level: "write",
-		Args:  1,
-	},
-
-	// file operations
-	"touch": {
-		Level: "write",
-		Args:  1,
-	},
-
-	"cp": {
-		Level: "write",
-		Args:  2,
-	},
-
-	"mv": {
-		Level: "write",
-		Args:  2,
-	},
-
-	// file search
-	"find": {
-		Level: "read",
-		Args:  1,
-		AllowedFlags: map[string]bool{
-			"-name": true,
-			"-type": true,
-		},
-	},
-
-	"grep": {
-		Level: "read",
-		Args:  2,
-		AllowedFlags: map[string]bool{
-			"-r": true,
-			"-n": true,
-			"-i": true,
-		},
-	},
-
-	// system info
-	"whoami": {
-		Level: "read",
-		Args:  0,
-	},
-
-	"id": {
-		Level: "read",
-		Args:  0,
-	},
-
-	"uname": {
-		Level: "read",
-		Args:  0,
-		AllowedFlags: map[string]bool{
-			"-a": true,
-		},
-	},
-
-	"df": {
-		Level: "read",
-		Args:  0,
-		AllowedFlags: map[string]bool{
-			"-h": true,
-		},
-	},
-
-	"du": {
-		Level: "read",
-		Args:  1,
-		AllowedFlags: map[string]bool{
-			"-h": true,
-			"-s": true,
-		},
-	},
-
-	"env": {
-		Level: "read",
-		Args:  0,
-	},
-
-	// git tools
-	"git_status": {
-		Level: "read",
-		Args:  0,
-	},
-
-	"git_diff": {
-		Level: "read",
-		Args:  0,
-	},
-
-	"git_log": {
-		Level: "read",
-		Args:  0,
-	},
-
-	"git_commit": {
-		Level: "write",
-		Args:  1,
-	},
-
-	// go tools
-	"run_go": {
-		Level: "execute",
-		Args:  1,
-	},
-
-	"run_tests": {
-		Level: "execute",
-		Args:  0,
-	},
-
-	// network
-	"http_get": {
-		Level: "network",
-		Args:  1,
-	},
-
-	"download_file": {
-		Level: "network",
-		Args:  2,
-	},
+// IsAllowed returns true for commands that are not blocked.  It exists
+// mainly for backwards‑compatible callers that expect the old semantics.
+func IsAllowed(cmd string) bool {
+	return !IsBlocked(cmd)
 }

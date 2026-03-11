@@ -11,7 +11,7 @@ import (
 // that the model supplies can be either a simple shell-like command
 // line or a small JSON document with explicit fields.  The service is
 // responsible for parsing the input, validating it against the
-// whitelist and invoking the lower-level Command object.
+// blacklist and invoking the lower-level Command object.
 
 // Service holds state that is shared between invocations, currently only
 // the working directory as modified by "cd" commands.
@@ -33,14 +33,14 @@ func NewService() *Service {
 //
 // The latter form is useful when the agent reasoning produces structured
 // output.  After parsing, the command name is checked against the
-// whitelist, and the underlying Command.Exec method is invoked.
+// blacklist, and the underlying Command.Exec method is invoked.
 func (s *Service) ExecuteFromLLM(raw string) (string, error) {
 	cmdName, args, err := s.parse(raw)
 	if err != nil {
 		return "", err
 	}
-	if !IsAllowed(cmdName) {
-		return "", errors.New("command not allowed")
+	if IsBlocked(cmdName) {
+		return "", errors.New("command blocked")
 	}
 	return s.cmd.Exec(cmdName, strings.Join(args, " "))
 }
