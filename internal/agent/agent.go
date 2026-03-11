@@ -115,26 +115,32 @@ func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
 
 func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
 	if len(body.Choices) == 0 || len(body.Choices[0].Message.ToolCalls) == 0 {
+		if body.Choices[0].FinishReason == "stop" {
+			return body.Choices[0].Message.Content, true, nil
+		}
 		return "", false, errors.New("no tool calls")
 	}
 	if len(body.Choices[0].Message.ToolCalls) > 1 {
 		a.Logger.Warn("multiple tool calls received; only the first will be executed")
 	}
 	i := body.Choices[0].Message.ToolCalls[0]
-	a.Logger.Agent("RunTool processing", "tool", i.Function.Name)
 	switch i.Function.Name {
 	case "reasoning":
 		args, err := parseAgentResponse(body)
 		if err != nil {
 			return "", false, err
 		}
+		if args.Thought != "" {
+			a.Logger.Agent("agent thought", "thought", args.Thought)
+		}
 		if args.Func.Function == "" {
 			return "", false, nil
 		}
+		a.Logger.Agent("agent tool", "tool", args.Func.Function, "args", string(args.Func.Arguments))
 		s, err := a.RunFunc(args)
 		return s, true, err
 	case "command":
-		a.Logger.Agent("executing command", "args", i.Function.Arguments)
+		a.Logger.Agent("agent tool", "tool", i.Function.Name, "args", i.Function.Arguments)
 		// use command service directly for simple invocation
 		svc := command.NewService()
 		out, err := svc.ExecuteFromLLM(i.Function.Arguments)

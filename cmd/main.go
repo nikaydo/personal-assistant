@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -15,7 +17,15 @@ import (
 )
 
 func main() {
-	l := logg.InitLogger()
+	var logMode string
+	flag.StringVar(&logMode, "log", "", "log output: none, pretty (default full)")
+	flag.Parse()
+	if logMode != "" && logMode != "none" && logMode != "pretty" && logMode != "full" {
+		fmt.Fprintln(os.Stderr, "invalid --log value:", logMode)
+		os.Exit(1)
+	}
+
+	l := logg.InitLoggerWithMode(logMode)
 	l.WithModule("SYSTEM").Info("Starting application")
 	config, err := config.ConfigRead("./settings.json")
 	if err != nil {

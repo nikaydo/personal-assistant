@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
 var (
@@ -19,6 +21,7 @@ var (
 	ErrorLevel    = 2
 	MemoryLevel   = 3
 	AgentLevel    = 5
+	minLogLevel   = slog.Level(-10)
 )
 
 type teeWriter struct {
@@ -61,6 +64,7 @@ func (l *Logger) WithModule(module string) *Logger {
 
 	return &Logger{
 		Customlogger: l.Customlogger.With(slog.String("module", module)),
+		Mode:         l.Mode,
 	}
 }
 
@@ -110,19 +114,42 @@ func (l *Logger) Error(msg ...any) {
 }
 
 func InitLogger() *Logger {
-	writer := io.Writer(os.Stdout)
+	return InitLoggerWithMode("")
+}
+
+func InitLoggerWithMode(mode string) *Logger {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "full"
+	}
 	logFileName := time.Now().Format("2006-01-02_15-04-05") + ".log"
 
 	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	var fileHandler slog.Handler
 	if err == nil {
-		writer = &teeWriter{
-			console: os.Stdout,
-			file:    logFile,
+		fileHandler = NewPlainHandler(logFile, minLogLevel)
+	}
+
+	var consoleHandler slog.Handler
+	switch mode {
+	case "none":
+		consoleHandler = NewPlainHandler(io.Discard, minLogLevel)
+	case "pretty":
+		consoleHandler = NewPrettyHandler(os.Stdout, minLogLevel)
+	default:
+		consoleHandler = NewColorHandler(os.Stdout, minLogLevel)
+	}
+
+	if fileHandler == nil {
+		return &Logger{
+			Customlogger: slog.New(consoleHandler),
+			Mode:         mode,
 		}
 	}
 
 	return &Logger{
-		Customlogger: slog.New(NewColorHandler(writer, slog.LevelDebug)),
+		Customlogger: slog.New(NewMultiHandler(fileHandler, consoleHandler)),
+		Mode:         mode,
 	}
 }
 
@@ -193,6 +220,250 @@ func (h *ColorHandler) WithGroup(name string) slog.Handler {
 		attrs: h.attrs,
 		group: name,
 	}
+}
+
+type PlainHandler struct {
+	w     io.Writer
+	level slog.Level
+	attrs []slog.Attr
+	group string
+}
+
+func NewPlainHandler(w io.Writer, level slog.Level) *PlainHandler {
+	return &PlainHandler{
+		w:     w,
+		level: level,
+	}
+}
+
+func (h *PlainHandler) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= h.level
+}
+
+func (h *PlainHandler) Handle(_ context.Context, r slog.Record) error {
+	allAttrs := make([]slog.Attr, 0, len(h.attrs)+r.NumAttrs())
+	allAttrs = append(allAttrs, h.attrs...)
+	r.Attrs(func(a slog.Attr) bool {
+		allAttrs = append(allAttrs, a)
+		return true
+	})
+
+	module := "SYSTEM"
+	fields := make(map[string]any, len(allAttrs))
+	level := levelName(r.Level)
+
+	for _, a := range allAttrs {
+		if a.Key == "module" {
+			module = strings.ToUpper(strings.TrimSpace(fmt.Sprint(a.Value.Any())))
+			continue
+		}
+		fields[a.Key] = a.Value.Any()
+	}
+
+	line := fmt.Sprintf(
+		"%s %s [%s] %s",
+		r.Time.Format("2006-01-02 15:04:05"),
+		level,
+		module,
+		formatMessage(r.Message),
+	)
+
+	if len(fields) > 0 {
+		line += " | " + formatFieldsJSON(fields)
+	}
+
+	_, err := io.WriteString(h.w, line+"\n")
+	return err
+}
+
+func (h *PlainHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	newAttrs := make([]slog.Attr, len(h.attrs)+len(attrs))
+	copy(newAttrs, h.attrs)
+	copy(newAttrs[len(h.attrs):], attrs)
+
+	return &PlainHandler{
+		w:     h.w,
+		level: h.level,
+		attrs: newAttrs,
+		group: h.group,
+	}
+}
+
+func (h *PlainHandler) WithGroup(name string) slog.Handler {
+	return &PlainHandler{
+		w:     h.w,
+		level: h.level,
+		attrs: h.attrs,
+		group: name,
+	}
+}
+
+type PrettyHandler struct {
+	w     io.Writer
+	level slog.Level
+	attrs []slog.Attr
+	group string
+}
+
+func NewPrettyHandler(w io.Writer, level slog.Level) *PrettyHandler {
+	return &PrettyHandler{
+		w:     w,
+		level: level,
+	}
+}
+
+func (h *PrettyHandler) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= h.level
+}
+
+func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
+	allAttrs := make([]slog.Attr, 0, len(h.attrs)+r.NumAttrs())
+	allAttrs = append(allAttrs, h.attrs...)
+	r.Attrs(func(a slog.Attr) bool {
+		allAttrs = append(allAttrs, a)
+		return true
+	})
+
+	module := "SYSTEM"
+	attrs := make(map[string]any, len(allAttrs))
+	for _, a := range allAttrs {
+		if a.Key == "module" {
+			module = strings.ToUpper(strings.TrimSpace(fmt.Sprint(a.Value.Any())))
+			continue
+		}
+		attrs[a.Key] = a.Value.Any()
+	}
+	if module == "QUEUE" {
+		return nil
+	}
+
+	timestamp := r.Time.Format("2006-01-02 15:04:05")
+	switch {
+	case r.Level == slog.Level(QuestionLevel):
+		line := fmt.Sprintf(
+			"%s %s %s Question: %s",
+			timestamp,
+			colorLevel(levelName(r.Level), r.Level),
+			colorModule(module),
+			prettyMessage(r.Message, attrs),
+		)
+		_, err := io.WriteString(h.w, line+"\n")
+		return err
+	case r.Level == slog.Level(AnswerLevel):
+		line := fmt.Sprintf(
+			"%s %s %s Answer: %s",
+			timestamp,
+			colorLevel(levelName(r.Level), r.Level),
+			colorModule(module),
+			extractAnswer(attrs, r.Message),
+		)
+		_, err := io.WriteString(h.w, line+"\n")
+		return err
+	case r.Level == slog.Level(AgentLevel) || r.Level == slog.Level(TaskLevel):
+		label, text, ok := prettyAgentLine(attrs)
+		if !ok {
+			return nil
+		}
+		line := fmt.Sprintf(
+			"%s %s %s %s: %s",
+			timestamp,
+			colorLevel(levelName(r.Level), r.Level),
+			colorModule(module),
+			label,
+			text,
+		)
+		_, err := io.WriteString(h.w, line+"\n")
+		return err
+	case r.Level == slog.Level(MemoryLevel):
+		return nil
+	case r.Level == slog.LevelDebug:
+		return nil
+	}
+
+	level := levelName(r.Level)
+	line := fmt.Sprintf(
+		"%s %s %s %s",
+		timestamp,
+		colorLevel(level, r.Level),
+		colorModule(module),
+		formatMessage(r.Message),
+	)
+	if errVal, ok := attrs["error"]; ok {
+		line += " | error=" + formatValueForLog(errVal)
+	}
+	_, err := io.WriteString(h.w, line+"\n")
+	return err
+}
+
+func (h *PrettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	newAttrs := make([]slog.Attr, len(h.attrs)+len(attrs))
+	copy(newAttrs, h.attrs)
+	copy(newAttrs[len(h.attrs):], attrs)
+
+	return &PrettyHandler{
+		w:     h.w,
+		level: h.level,
+		attrs: newAttrs,
+		group: h.group,
+	}
+}
+
+func (h *PrettyHandler) WithGroup(name string) slog.Handler {
+	return &PrettyHandler{
+		w:     h.w,
+		level: h.level,
+		attrs: h.attrs,
+		group: name,
+	}
+}
+
+type MultiHandler struct {
+	handlers []slog.Handler
+}
+
+func NewMultiHandler(handlers ...slog.Handler) *MultiHandler {
+	out := make([]slog.Handler, 0, len(handlers))
+	for _, h := range handlers {
+		if h != nil {
+			out = append(out, h)
+		}
+	}
+	return &MultiHandler{handlers: out}
+}
+
+func (h *MultiHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	for _, handler := range h.handlers {
+		if handler.Enabled(ctx, level) {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *MultiHandler) Handle(ctx context.Context, r slog.Record) error {
+	var firstErr error
+	for _, handler := range h.handlers {
+		if err := handler.Handle(ctx, r); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (h *MultiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := make([]slog.Handler, 0, len(h.handlers))
+	for _, handler := range h.handlers {
+		next = append(next, handler.WithAttrs(attrs))
+	}
+	return &MultiHandler{handlers: next}
+}
+
+func (h *MultiHandler) WithGroup(name string) slog.Handler {
+	next := make([]slog.Handler, 0, len(h.handlers))
+	for _, handler := range h.handlers {
+		next = append(next, handler.WithGroup(name))
+	}
+	return &MultiHandler{handlers: next}
 }
 
 func levelName(level slog.Level) string {
@@ -284,6 +555,65 @@ func formatValueForLog(v any) string {
 func strconvQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+func prettyMessage(msg string, attrs map[string]any) string {
+	if msg != "" {
+		return msg
+	}
+	if v, ok := attrs["data"]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return "-"
+}
+
+func extractAnswer(attrs map[string]any, fallback string) string {
+	if fallback != "" {
+		return fallback
+	}
+	keys := []string{"data", "data1", "data2"}
+	for _, key := range keys {
+		v, ok := attrs[key]
+		if !ok {
+			continue
+		}
+		switch val := v.(type) {
+		case models.ResponseBody:
+			if content := val.GetContent(); content != "" {
+				return content
+			}
+		case *models.ResponseBody:
+			if val != nil {
+				if content := val.GetContent(); content != "" {
+					return content
+				}
+			}
+		case string:
+			if val != "" {
+				return val
+			}
+		}
+	}
+	return "-"
+}
+
+func prettyAgentLine(attrs map[string]any) (string, string, bool) {
+	if v, ok := attrs["thought"]; ok {
+		return "LLM Thought", fmt.Sprint(v), true
+	}
+	if v, ok := attrs["tool"]; ok {
+		args := ""
+		if av, ok := attrs["args"]; ok {
+			args = fmt.Sprint(av)
+		}
+		if args != "" {
+			return "Tool", fmt.Sprintf("%v args=%s", v, args), true
+		}
+		return "Tool", fmt.Sprint(v), true
+	}
+	return "", "", false
 }
 
 func normalizeLogArgs(args ...any) (string, []slog.Attr) {
