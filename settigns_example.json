@@ -18,6 +18,9 @@
     "high_border_max_context":5000,
     "summary_memory_step":1500,
     "memory_state_file":"./data/memory_state.json",
+    "llm_retry_max_attempts": 3,
+    "llm_retry_base_delay_ms": 200,
+    "llm_retry_max_delay_ms": 2000,
     
     "jira_api_key":"",
     "jira_email":"",

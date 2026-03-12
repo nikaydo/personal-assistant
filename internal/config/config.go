@@ -50,6 +50,11 @@ type Config struct {
 	PromtSystemAgent       string `json:"promt_system_agent"`
 	PromtMemorySummary     string `json:"promt_memory_summary"`
 	MemorySummaryUserPromt string `json:"memory_summary_user_promt"`
+
+	// LLM request stability tuning
+	LLMRetryMaxAttempts int `json:"llm_retry_max_attempts"`
+	LLMRetryBaseDelayMs int `json:"llm_retry_base_delay_ms"`
+	LLMRetryMaxDelayMs  int `json:"llm_retry_max_delay_ms"`
 }
 
 func ConfigRead(path string) (*Config, error) {
@@ -108,6 +113,16 @@ func applyEnvOverrides(config *Config) error {
 	config.PromtSystemAgent = getEnvString("PROMT_SYSTEM_AGENT", config.PromtSystemAgent)
 	config.PromtMemorySummary = getEnvString("PROMT_MEMORY_SUMMARY", config.PromtMemorySummary)
 	config.MemorySummaryUserPromt = getEnvString("MEMORY_SUMMARY_USER_PROMT", config.MemorySummaryUserPromt)
+
+	if config.LLMRetryMaxAttempts, err = getEnvInt("LLM_RETRY_MAX_ATTEMPTS", config.LLMRetryMaxAttempts); err != nil {
+		return err
+	}
+	if config.LLMRetryBaseDelayMs, err = getEnvInt("LLM_RETRY_BASE_DELAY_MS", config.LLMRetryBaseDelayMs); err != nil {
+		return err
+	}
+	if config.LLMRetryMaxDelayMs, err = getEnvInt("LLM_RETRY_MAX_DELAY_MS", config.LLMRetryMaxDelayMs); err != nil {
+		return err
+	}
 
 	return nil
 }

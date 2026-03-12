@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/nikaydo/personal-assistant/internal/config"
@@ -22,10 +24,9 @@ func Ask(body models.RequestBody, cfg config.Config) (models.ResponseBody, error
 	if err != nil {
 		return models.ResponseBody{}, err
 	}
-	respBody, err := doReq(jsonBody, cfg.ApiUrlOpenrouter, cfg.ApiKeyOpenrouter, "POST")
+	respBody, err := doReqWithRetry(jsonBody, cfg.ApiUrlOpenrouter, cfg.ApiKeyOpenrouter, "POST", cfg)
 	if err != nil {
-		// wrap error with request body so callers (and logs) can inspect what was sent
-		return models.ResponseBody{}, fmt.Errorf("%w request=%s", err, string(jsonBody))
+		return models.ResponseBody{}, err
 	}
 	var response models.ResponseBody
 	err = json.Unmarshal(respBody, &response)
@@ -44,7 +45,7 @@ func CreateEmbending(input string, cfg config.Config) (models.EmbendingResponse,
 	if err != nil {
 		return models.EmbendingResponse{}, err
 	}
-	respBody, err := doReq(jsonBody, cfg.ApiUrlOpenrouterEmbeddings, cfg.ApiKeyOpenrouter, "POST")
+	respBody, err := doReqWithRetry(jsonBody, cfg.ApiUrlOpenrouterEmbeddings, cfg.ApiKeyOpenrouter, "POST", cfg)
 	if err != nil {
 		return models.EmbendingResponse{}, err
 	}
@@ -54,6 +55,62 @@ func CreateEmbending(input string, cfg config.Config) (models.EmbendingResponse,
 		return models.EmbendingResponse{}, err
 	}
 	return response, nil
+}
+
+func doReqWithRetry(buf []byte, url, token, method string, cfg config.Config) ([]byte, error) {
+	attempts := cfg.LLMRetryMaxAttempts
+	if attempts <= 0 {
+		attempts = 3
+	}
+	baseDelayMs := cfg.LLMRetryBaseDelayMs
+	if baseDelayMs <= 0 {
+		baseDelayMs = 200
+	}
+	maxDelayMs := cfg.LLMRetryMaxDelayMs
+	if maxDelayMs <= 0 {
+		maxDelayMs = 2000
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		respBody, err := doReq(buf, url, token, method)
+		if err == nil {
+			return respBody, nil
+		}
+		lastErr = err
+		if !isRetryableLLMError(err) || attempt == attempts {
+			break
+		}
+		delay := backoffDelay(attempt, baseDelayMs, maxDelayMs)
+		time.Sleep(delay)
+	}
+	return nil, fmt.Errorf("openrouter request failed after %d attempt(s): %w", attempts, lastErr)
+}
+
+func isRetryableLLMError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "status=408") || strings.Contains(msg, "status=409") || strings.Contains(msg, "status=425") ||
+		strings.Contains(msg, "status=429") || strings.Contains(msg, "status=500") || strings.Contains(msg, "status=502") ||
+		strings.Contains(msg, "status=503") || strings.Contains(msg, "status=504") {
+		return true
+	}
+	return strings.Contains(msg, "timeout") || strings.Contains(msg, "tempor") || strings.Contains(msg, "connection reset")
+}
+
+func backoffDelay(attempt, baseDelayMs, maxDelayMs int) time.Duration {
+	mult := 1 << (attempt - 1)
+	delay := baseDelayMs * mult
+	if delay > maxDelayMs {
+		delay = maxDelayMs
+	}
+	if delay <= 1 {
+		return time.Duration(delay) * time.Millisecond
+	}
+	jitter := rand.Intn(delay / 2)
+	return time.Duration(delay/2+jitter) * time.Millisecond
 }
 
 func doReq(buf []byte, url, token, method string) ([]byte, error) {
