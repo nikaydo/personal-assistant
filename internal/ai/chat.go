@@ -5,18 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/nikaydo/personal-assistant/internal/agent"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
 	mod "github.com/nikaydo/personal-assistant/internal/models"
 )
-
-var addToQueueFn = func(q *llmcalls.Queue, item llmcalls.QueueItem) (mod.ResponseBody, error) {
-	return q.AddToQueue(item)
-}
-
-var detectChosenToolFn = func(a *agent.Agent, body mod.ResponseBody, system *mod.SystemSettings, tools *[]mod.ToolsHistory, msg []mod.Message) (mod.ResponseBody, error) {
-	return a.DetectChosenTool(body, system, tools, msg)
-}
 
 func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 	ai.Logger.Question(q)
@@ -26,7 +17,7 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 		"history_messages", len(history),
 		"tools_count", len(tools),
 	)
-	respLLM, err := addToQueueFn(ai.Queue, llmcalls.QueueItem{Body: ai.makeBody(history, tools)})
+	respLLM, err := ai.Queue.AddToQueue(llmcalls.QueueItem{Body: ai.makeBody(history, tools)})
 	if err != nil {
 		ai.Logger.Error("MakeAsk: ask request failed:", err)
 		return mod.ResponseBody{}, err
@@ -35,40 +26,13 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 		ai.Logger.Error(respLLM.Error)
 		return mod.ResponseBody{}, fmt.Errorf("error: %s", respLLM.Error.Message)
 	}
-
 	msgChoice, err := firstChoice(respLLM)
 	if err != nil {
 		ai.Logger.Error("MakeAsk: firstChoice failed:", err)
 		return mod.ResponseBody{}, err
 	}
-
 	if len(msgChoice.ToolCalls) > 0 {
 		ai.Logger.Task("Found tool in response, handling tool calls in chat flow", respLLM)
-
-		// ensure agent is wired up with the current runtime context
-		if ai.Agent.Queue == nil {
-			ai.Agent.Queue = ai.Queue
-		}
-		if ai.Agent.Logger == nil {
-			ai.Agent.Logger = ai.Logger
-		}
-		if ai.Agent.History == nil {
-			ai.Agent.History = &[]mod.Message{}
-		}
-		if ai.Agent.Model == "" && len(ai.Model) > 0 {
-			ai.Agent.Model = ai.Model[0]
-		}
-		if ai.Agent.SystemPrompt == "" {
-			ai.Agent.SystemPrompt = ai.Config.PromtSystemAgent
-		}
-		if ai.Agent.Cfg.ApiKeyOpenrouter == "" {
-			ai.Agent.Cfg = ai.Config
-		}
-		if ai.Agent.Dbase == nil {
-			ai.Agent.Dbase = ai.Memory.DBase
-		}
-
-		// seed agent history with the question when agent_mode doesn't include it
 		firstTool := msgChoice.ToolCalls[0]
 		if firstTool.Function.Name == "agent_mode" {
 			*ai.Agent.History = []mod.Message{}
@@ -80,8 +44,7 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 				*ai.Agent.History = append(*ai.Agent.History, mod.Message{Role: "user", Content: q})
 			}
 		}
-
-		respLLM, err = detectChosenToolFn(&ai.Agent, respLLM, ai.Memory.SystemMemory, ai.Memory.ToolsMemory, history)
+		respLLM, err = ai.Agent.DetectChosenTool(respLLM, ai.Memory.SystemMemory, ai.Memory.ToolsMemory, history)
 		if err != nil {
 			ai.Logger.Error("MakeAsk: tool call handling failed:", err)
 			return mod.ResponseBody{}, err
@@ -95,7 +58,6 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 			return mod.ResponseBody{}, err
 		}
 	}
-
 	if msgChoice.Content == "" {
 		err := fmt.Errorf("empty model answer without tool_calls")
 		ai.Logger.Error("MakeAsk:", err)
@@ -104,7 +66,6 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 	go func() {
 		ai.Memory.Memory(q, respLLM, ai.Queue, ai.Model[0])
 	}()
-
 	ai.Logger.Answer(respLLM)
 	return respLLM, nil
 }

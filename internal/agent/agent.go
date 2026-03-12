@@ -93,6 +93,7 @@ func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
 			a.Logger.Error("RunTool failed", "error", err)
 			return models.ResponseBody{}, err
 		}
+
 		a.Logger.Agent("RunTool: ", out)
 		if stop {
 			a.Logger.Agent("agent stopping")
@@ -137,18 +138,20 @@ func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
 			return "", false, nil
 		}
 		a.Logger.Agent("agent tool", "tool", args.Func.Function, "args", string(args.Func.Arguments))
-		s, err := a.RunFunc(args)
-		return s, true, err
+		return args.Thought, false, nil
 	case "command":
 		a.Logger.Agent("agent tool", "tool", i.Function.Name, "args", i.Function.Arguments)
-		// use command service directly for simple invocation
 		svc := command.NewService()
-		out, err := svc.ExecuteFromLLM(i.Function.Arguments)
-		if err != nil {
-			a.Logger.Warn("command execution failed", "error", err)
-			return err.Error(), false, nil
+		data := svc.ExecuteFromLLM(i.Function.Arguments, services.CommandList{Type: false})
+		if data.Error != "" {
+			a.Logger.Warn("command execution failed", "error", data.Error)
+			return data.Error, false, nil
 		}
-		return out, false, nil
+		b, err := json.Marshal(data)
+		if err != nil {
+			return "", false, err
+		}
+		return string(b), false, nil
 	case "stop":
 		var args struct {
 			R string `json:"response"`
@@ -160,29 +163,6 @@ func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
 		return args.R, true, nil
 	}
 	return "", false, errors.New("unknown tool")
-}
-
-func (a *Agent) RunFunc(args AgentResponse) (string, error) {
-	a.Logger.Agent("RunFunc called", "function", args.Func.Function)
-	switch args.Func.Function {
-	case "command":
-		// delegate to the command service which knows how to interpret
-		// the arguments string emitted by the LLM.
-		svc := services.NewCommandService()
-		rawArgs := string(args.Func.Arguments)
-		if rawArgs == "null" {
-			rawArgs = ""
-		}
-		out, err := svc.ExecuteFromLLM(rawArgs)
-		if err != nil {
-			a.Logger.Error("RunFunc command failed", "error", err)
-			return "", err
-		}
-		return out, nil
-	default:
-		a.Logger.Warn("RunFunc unknown function", "name", args.Func.Function)
-		return "", errors.New("unknown func")
-	}
 }
 
 func getFuncNameArgs(body models.ResponseBody) (struct {

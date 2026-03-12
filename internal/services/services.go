@@ -14,3 +14,5 @@ var SummaryWiki = wikipedia.Summary
 
 // command
 var NewCommandService = command.NewService
+
+type CommandList = command.CommandList

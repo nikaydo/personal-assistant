@@ -3,7 +3,9 @@ package command
 import (
 	"encoding/json"
 	"errors"
-	"strings"
+	"slices"
+
+	"github.com/google/shlex"
 )
 
 // Service provides a thin facade around command execution.  It is
@@ -19,46 +21,101 @@ type Service struct {
 	cmd *Command
 }
 
+// type if true then its allowed list if false its blocklist
+type CommandList struct {
+	Type       bool
+	AskAllowed bool
+	List       map[string][]string
+}
+
+func CheckCommand(cmdToExec string, args []string, c CommandList) bool {
+	switch c.Type {
+	//allowed to execute
+	//if command in List then command allowed to execute
+	case true:
+		allowedArgs, ok := c.List[cmdToExec]
+		if ok {
+			if allowedArgs == nil {
+				return true
+			}
+			for _, i := range args {
+				if !slices.Contains(allowedArgs, i) {
+					return false
+				}
+			}
+			return true
+		}
+
+		return false
+	//denied to execute
+	//if command not in list then allowed to execute
+	case false:
+		_, ok := c.List[cmdToExec]
+		if !ok {
+			return true
+		}
+		return false
+	default:
+		return false
+	}
+}
+
 // NewService returns a ready-to-use command service.
 func NewService() *Service {
 	return &Service{cmd: &Command{}}
 }
 
-// ExecuteFromLLM takes the raw string passed from the model and executes
-// the corresponding command.  It understands two representations:
-//
-//   - a plain shell-style string such as "ls -la /tmp"
-//   - a JSON object like
-//     {"command":"ls","args":["-la","/tmp"]}
-//
-// The latter form is useful when the agent reasoning produces structured
-// output.  After parsing, the command name is checked against the
-// blacklist, and the underlying Command.Exec method is invoked.
-func (s *Service) ExecuteFromLLM(raw string) (string, error) {
+func (s *Service) ExecuteFromLLM(raw string, cList CommandList) struct {
+	Stdout string `json:"stdout"`
+	Stdin  string `json:"stdin"`
+	Code   int    `json:"exit_code"`
+	Error  string `json:"error"`
+} {
+	var data struct {
+		Stdout string `json:"stdout"`
+		Stdin  string `json:"stdin"`
+		Code   int    `json:"exit_code"`
+		Error  string `json:"error"`
+	}
 	cmdName, args, err := s.parse(raw)
 	if err != nil {
-		return "", err
+		data.Error = err.Error()
+		return data
 	}
-	if IsBlocked(cmdName) {
-		return "", errors.New("command blocked")
+	if !CheckCommand(cmdName, args, cList) {
+		data.Error = "Command not allowed"
+		return data
 	}
-	return s.cmd.Exec(cmdName, args)
+
+	data.Stdout, data.Stdin, data.Code, err = s.cmd.Exec(cmdName, args...)
+	if err != nil {
+		data.Error = err.Error()
+	}
+	data.Error = ""
+	return data
+
 }
 
 // parse decodes the raw input into a command name and argument slice.
 func (s *Service) parse(raw string) (string, []string, error) {
-	// try JSON first
+
 	var j struct {
-		Command string   `json:"command,omitempty"`
-		Args    []string `json:"args,omitempty"`
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
 	}
-	if err := json.Unmarshal([]byte(raw), &j); err == nil && j.Command != "" {
+
+	if json.Unmarshal([]byte(raw), &j) == nil && j.Command != "" {
 		return j.Command, j.Args, nil
 	}
 
-	fields := strings.Fields(raw)
-	if len(fields) == 0 {
-		return "", nil, errors.New("no command provided")
+	args, err := shlex.Split(raw)
+	if err != nil {
+		return "", nil, err
 	}
-	return fields[0], fields[1:], nil
+
+	if len(args) == 0 {
+		return "", nil, errors.New("empty command")
+	}
+
+	return args[0], args[1:], nil
 }
