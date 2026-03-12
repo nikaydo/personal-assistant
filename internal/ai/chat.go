@@ -11,7 +11,12 @@ import (
 
 func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 	ai.Logger.Question(q)
-	history := ai.Memory.MessageWithHistory(q, ai.Config.PromtSystemChat)
+	systemPrompt := ai.Config.PromtSystemChat
+	if systemPrompt != "" {
+		systemPrompt += "\n"
+	}
+	systemPrompt += "Tool policy: If the user request requires actions or tool usage (files, commands, external actions), you must call the agent_mode function with the original user request in the question field. Otherwise answer directly without tool calls."
+	history := ai.Memory.MessageWithHistory(q, systemPrompt)
 	ai.Logger.Info(
 		"MakeAsk: sending LLM request",
 		"history_messages", len(history),

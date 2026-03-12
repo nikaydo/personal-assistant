@@ -10,6 +10,15 @@ import (
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
+func mustAgentResponse(t *testing.T, s string) AgentResponse {
+	t.Helper()
+	var r AgentResponse
+	if err := json.Unmarshal([]byte(s), &r); err != nil {
+		t.Fatalf("failed to unmarshal agent response: %v", err)
+	}
+	return r
+}
+
 func TestGetAgentTool_IncludesCommand(t *testing.T) {
 	tools := GetAgentTool()
 	found := false
@@ -73,6 +82,148 @@ func TestRunTool_CommandJSON(t *testing.T) {
 	}
 }
 
+func TestRunTool_ReasoningActionArguments(t *testing.T) {
+	agent := Agent{Logger: logg.InitLogger()}
+	resp := fakeResponse("reasoning", `{"thought":"t","action":{"function":"command","arguments":{"command":"echo","args":["hi"]}}}`)
+	out, stop, err := agent.RunTool(resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stop {
+		t.Fatal("stop flag should be false")
+	}
+	if !strings.Contains(out, "hi") {
+		t.Errorf("expected output to contain command result, got %q", out)
+	}
+}
+
+func TestRunTool_ReasoningActionArgsAlias(t *testing.T) {
+	agent := Agent{Logger: logg.InitLogger()}
+	resp := fakeResponse("reasoning", `{"thought":"t","action":{"function":"command","args":["echo","hi"]}}`)
+	out, stop, err := agent.RunTool(resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stop {
+		t.Fatal("stop flag should be false")
+	}
+	if !strings.Contains(out, "hi") {
+		t.Errorf("expected output to contain command result, got %q", out)
+	}
+}
+
+func TestNormalizeCommandSpec_ArgumentsArray(t *testing.T) {
+	r := mustAgentResponse(t, `{"thought":"t","action":{"function":"command","arguments":["echo","ok"]}}`)
+	spec, err := normalizeCommandSpec(r)
+	if err != nil {
+		t.Fatalf("normalizeCommandSpec failed: %v", err)
+	}
+	if spec.Command != "echo" || len(spec.Args) != 1 || spec.Args[0] != "ok" || spec.Mode != "exec" {
+		t.Fatalf("unexpected spec: %+v", spec)
+	}
+}
+
+func TestNormalizeCommandSpec_ArgsObject(t *testing.T) {
+	r := mustAgentResponse(t, `{"thought":"t","action":{"function":"command","args":{"command":"echo","args":["ok"],"mode":"exec"}}}`)
+	spec, err := normalizeCommandSpec(r)
+	if err != nil {
+		t.Fatalf("normalizeCommandSpec failed: %v", err)
+	}
+	if spec.Command != "echo" || len(spec.Args) != 1 || spec.Args[0] != "ok" || spec.Mode != "exec" {
+		t.Fatalf("unexpected spec: %+v", spec)
+	}
+}
+
+func TestNormalizeCommandSpec_FunctionWithPrefix(t *testing.T) {
+	r := mustAgentResponse(t, `{"thought":"t","action":{"function":"functions.command","arguments":{"command":"echo","args":["ok"]}}}`)
+	spec, err := normalizeCommandSpec(r)
+	if err != nil {
+		t.Fatalf("normalizeCommandSpec failed: %v", err)
+	}
+	if spec.Command != "echo" || len(spec.Args) != 1 || spec.Args[0] != "ok" {
+		t.Fatalf("unexpected spec: %+v", spec)
+	}
+}
+
+func TestNormalizeCommandSpec_InfersCommandWhenMissingFunction(t *testing.T) {
+	r := mustAgentResponse(t, `{"thought":"t","action":{"arguments":{"command":"echo","args":["ok"]}}}`)
+	spec, err := normalizeCommandSpec(r)
+	if err != nil {
+		t.Fatalf("normalizeCommandSpec failed: %v", err)
+	}
+	if spec.Command != "echo" || len(spec.Args) != 1 || spec.Args[0] != "ok" {
+		t.Fatalf("unexpected spec: %+v", spec)
+	}
+}
+
+func TestNormalizeCommandSpec_Conflict(t *testing.T) {
+	r := mustAgentResponse(t, `{"thought":"t","action":{"function":"command","arguments":{"command":"echo"},"args":["echo","ok"]}}`)
+	if _, err := normalizeCommandSpec(r); err == nil {
+		t.Fatal("expected conflict error when both arguments and args are provided")
+	}
+}
+
+func TestNormalizeCommandSpec_ShellArrayRejected(t *testing.T) {
+	r := mustAgentResponse(t, `{"thought":"t","action":{"function":"command","mode":"shell","arguments":["echo","ok"]}}`)
+	if _, err := normalizeCommandSpec(r); err == nil {
+		t.Fatal("expected shell array payload to be rejected")
+	}
+}
+
+func TestNormalizeCommandSpec_ShellArraySingleAccepted(t *testing.T) {
+	r := mustAgentResponse(t, `{"thought":"t","action":{"function":"command","mode":"shell","arguments":["echo ok > tts.txt"]}}`)
+	spec, err := normalizeCommandSpec(r)
+	if err != nil {
+		t.Fatalf("normalizeCommandSpec failed: %v", err)
+	}
+	if spec.Mode != "shell" || spec.Command != "echo ok > tts.txt" {
+		t.Fatalf("unexpected spec: %+v", spec)
+	}
+}
+
+func TestRunTool_ReasoningInvalidPayloadReturnsToolResult(t *testing.T) {
+	agent := Agent{Logger: logg.InitLogger()}
+	resp := fakeResponse("reasoning", `{"thought":"t","action":{"function":"command","mode":"shell","arguments":["echo","oops"]}}`)
+	out, stop, err := agent.RunTool(resp)
+	if err != nil {
+		t.Fatalf("unexpected fatal error: %v", err)
+	}
+	if stop {
+		t.Fatal("stop flag should be false")
+	}
+	tr, ok := toolResultFromOutput(out)
+	if !ok {
+		t.Fatalf("expected tool result json, got: %q", out)
+	}
+	if tr.Ok {
+		t.Fatalf("expected failed tool result, got: %+v", tr)
+	}
+	if !tr.Retryable {
+		t.Fatalf("expected retryable=true, got: %+v", tr)
+	}
+}
+
+func TestFailureGuard_RepeatedFailureStops(t *testing.T) {
+	g := newFailureGuard(2)
+	if g.observe("a", "err", true) {
+		t.Fatal("must not stop on first failure")
+	}
+	if !g.observe("a", "err", true) {
+		t.Fatal("must stop on second identical failure")
+	}
+}
+
+func TestFailureGuard_ResetsOnSuccess(t *testing.T) {
+	g := newFailureGuard(2)
+	_ = g.observe("a", "err", true)
+	if g.observe("", "", false) {
+		t.Fatal("success should reset guard")
+	}
+	if g.observe("a", "err", true) {
+		t.Fatal("must not stop after reset on first failure")
+	}
+}
+
 func TestHistorySanitization_EmptyThoughts(t *testing.T) {
 	agent := Agent{Logger: logg.InitLogger(), History: &[]models.Message{}}
 
@@ -115,10 +266,10 @@ func TestCollectContext_IncludesOutput(t *testing.T) {
 	if err := agent.CollectContext(body, "dir123"); err != nil {
 		t.Fatalf("CollectContext failed: %v", err)
 	}
-	if len(*agent.History) < 2 {
+	if len(*agent.History) < 1 {
 		t.Fatalf("history too short: %v", *agent.History)
 	}
-	funcMsg := (*agent.History)[len(*agent.History)-2]
+	funcMsg := (*agent.History)[len(*agent.History)-1]
 	if !containsSubstring(funcMsg.Content, "dir123") {
 		t.Errorf("expected output in function message content, got %q", funcMsg.Content)
 	}

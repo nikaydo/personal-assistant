@@ -3,7 +3,11 @@ package command
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/google/shlex"
 )
@@ -27,6 +31,24 @@ type CommandList struct {
 	AskAllowed bool
 	List       map[string][]string
 }
+
+type CommandSpec struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+	Mode    string   `json:"mode,omitempty"`
+}
+
+type ToolResult struct {
+	Ok        bool   `json:"ok"`
+	Stdout    string `json:"stdout"`
+	Stderr    string `json:"stderr"`
+	ExitCode  int    `json:"exit_code"`
+	Error     string `json:"error"`
+	Retryable bool   `json:"retryable"`
+}
+
+var catAppendWithoutInputRe = regexp.MustCompile(`(?m)^\s*cat\s*>>`)
+var shellRedirectTargetRe = regexp.MustCompile(`(?:>>|>)\s*['"]?([^'" \n;|&]+)['"]?`)
 
 func CheckCommand(cmdToExec string, args []string, c CommandList) bool {
 	switch c.Type {
@@ -65,57 +87,154 @@ func NewService() *Service {
 	return &Service{cmd: &Command{}}
 }
 
-func (s *Service) ExecuteFromLLM(raw string, cList CommandList) struct {
-	Stdout string `json:"stdout"`
-	Stdin  string `json:"stdin"`
-	Code   int    `json:"exit_code"`
-	Error  string `json:"error"`
-} {
-	var data struct {
-		Stdout string `json:"stdout"`
-		Stdin  string `json:"stdin"`
-		Code   int    `json:"exit_code"`
-		Error  string `json:"error"`
-	}
-	cmdName, args, err := s.parse(raw)
+func (s *Service) ExecuteFromLLM(raw string, cList CommandList) ToolResult {
+	spec, err := s.parse(raw)
 	if err != nil {
-		data.Error = err.Error()
-		return data
+		return ToolResult{
+			Ok:        false,
+			Error:     err.Error(),
+			Retryable: false,
+		}
 	}
-	if !CheckCommand(cmdName, args, cList) {
-		data.Error = "Command not allowed"
-		return data
-	}
+	return s.ExecuteSpec(spec, cList)
+}
 
-	data.Stdout, data.Stdin, data.Code, err = s.cmd.Exec(cmdName, args...)
-	if err != nil {
-		data.Error = err.Error()
+func (s *Service) ExecuteSpec(spec CommandSpec, cList CommandList) ToolResult {
+	result := ToolResult{
+		Ok:       false,
+		ExitCode: -1,
 	}
-	data.Error = ""
-	return data
+	mode := normalizeMode(spec.Mode)
+	if spec.Command == "" {
+		result.Error = "empty command"
+		return result
+	}
+	switch mode {
+	case "exec":
+		if !CheckCommand(spec.Command, spec.Args, cList) {
+			result.Error = "Command not allowed"
+			return result
+		}
+		stdout, stderr, exitCode, err := s.cmd.Exec(spec.Command, spec.Args...)
+		result.Stdout = stdout
+		result.Stderr = stderr
+		result.ExitCode = exitCode
+		if err != nil {
+			result.Error = err.Error()
+			result.Retryable = false
+			return result
+		}
+	case "shell":
+		// shell mode is explicit and executes script via "sh -c".
+		if err := validateShellScript(spec.Command); err != nil {
+			result.Error = err.Error()
+			result.Retryable = false
+			return result
+		}
+		stdout, stderr, exitCode, err := s.cmd.ExecShell(spec.Command)
+		result.Stdout = stdout
+		result.Stderr = stderr
+		result.ExitCode = exitCode
+		if err != nil {
+			result.Error = err.Error()
+			result.Retryable = false
+			return result
+		}
+	default:
+		result.Error = fmt.Sprintf("unsupported mode: %s", spec.Mode)
+		return result
+	}
+	if result.ExitCode != 0 {
+		if strings.TrimSpace(result.Stderr) != "" {
+			result.Error = strings.TrimSpace(result.Stderr)
+		} else {
+			result.Error = fmt.Sprintf("command exited with code %d", result.ExitCode)
+		}
+		result.Retryable = true
+		return result
+	}
+	result.Ok = true
+	if mode == "shell" {
+		if target, ok := extractShellRedirectTarget(spec.Command); ok {
+			if _, err := os.Stat(target); err != nil {
+				result.Ok = false
+				result.Error = fmt.Sprintf("shell command finished but target file is missing: %s", target)
+				result.Retryable = true
+			}
+		}
+	}
+	return result
+}
 
+func validateShellScript(script string) error {
+	s := strings.TrimSpace(script)
+	if s == "" {
+		return errors.New("empty shell script")
+	}
+	if catAppendWithoutInputRe.MatchString(s) && !strings.Contains(s, "<<") {
+		return errors.New("invalid shell script: 'cat >> file' requires input (use heredoc or printf)")
+	}
+	return nil
+}
+
+func extractShellRedirectTarget(script string) (string, bool) {
+	matches := shellRedirectTargetRe.FindAllStringSubmatch(script, -1)
+	if len(matches) == 0 {
+		return "", false
+	}
+	last := matches[len(matches)-1]
+	if len(last) < 2 {
+		return "", false
+	}
+	target := strings.TrimSpace(last[1])
+	if target == "" {
+		return "", false
+	}
+	return target, true
+}
+
+func normalizeMode(mode string) string {
+	if strings.TrimSpace(mode) == "" {
+		return "exec"
+	}
+	return strings.ToLower(strings.TrimSpace(mode))
 }
 
 // parse decodes the raw input into a command name and argument slice.
-func (s *Service) parse(raw string) (string, []string, error) {
+func (s *Service) parse(raw string) (CommandSpec, error) {
 
 	var j struct {
 		Command string   `json:"command"`
 		Args    []string `json:"args"`
+		Mode    string   `json:"mode"`
 	}
 
 	if json.Unmarshal([]byte(raw), &j) == nil && j.Command != "" {
-		return j.Command, j.Args, nil
+		mode := normalizeMode(j.Mode)
+		if mode == "shell" {
+			if strings.EqualFold(j.Command, "sh") && len(j.Args) >= 2 && j.Args[0] == "-c" {
+				return CommandSpec{Command: j.Args[1], Mode: "shell"}, nil
+			}
+			if len(j.Args) == 0 {
+				return CommandSpec{Command: j.Command, Mode: "shell"}, nil
+			}
+			return CommandSpec{}, errors.New("invalid shell command payload: use mode=shell with script or sh -c <script>")
+		}
+		return CommandSpec{Command: j.Command, Args: j.Args, Mode: mode}, nil
 	}
 
 	args, err := shlex.Split(raw)
 	if err != nil {
-		return "", nil, err
+		return CommandSpec{}, err
 	}
 
 	if len(args) == 0 {
-		return "", nil, errors.New("empty command")
+		return CommandSpec{}, errors.New("empty command")
 	}
 
-	return args[0], args[1:], nil
+	return CommandSpec{
+		Command: args[0],
+		Args:    args[1:],
+		Mode:    "exec",
+	}, nil
 }

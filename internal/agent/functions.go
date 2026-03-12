@@ -21,12 +21,41 @@ func GetAgentTool() []models.Tool {
 							"properties": map[string]any{
 								"function": map[string]any{
 									"type":        "string",
-									"description": "Name of the tool to call",
+									"description": "Name of the tool to call. Use literal 'command' (without namespace prefixes).",
+								},
+								"mode": map[string]any{
+									"type":        "string",
+									"enum":        []string{"exec", "shell"},
+									"description": "Execution mode. Use exec by default. Use shell only when shell operators/heredoc/redirection are required.",
 								},
 								"arguments": map[string]any{
-									"type":                 "object",
-									"description":          "Arguments for the tool",
-									"additionalProperties": true,
+									"oneOf": []map[string]any{
+										{
+											"type":                 "object",
+											"additionalProperties": true,
+										},
+										{
+											"type": "string",
+										},
+										{
+											"type":  "array",
+											"items": map[string]any{"type": "string"},
+										},
+									},
+									"description": "Primary action payload. Supported forms: object {command,args,mode}, command-line string, or string array [command,arg1,...]. For multiline text/file writes prefer mode=shell with printf or heredoc (cat <<'EOF').",
+								},
+								"args": map[string]any{
+									"oneOf": []map[string]any{
+										{
+											"type":  "array",
+											"items": map[string]any{"type": "string"},
+										},
+										{
+											"type":                 "object",
+											"additionalProperties": true,
+										},
+									},
+									"description": "Backward-compatible alias for arguments. Do not send both arguments and args in one action.",
 								},
 							},
 							"required": []string{"function"},
@@ -69,6 +98,11 @@ func GetAgentTool() []models.Tool {
 							"type":        "array",
 							"items":       map[string]any{"type": "string"},
 							"description": "List of arguments",
+						},
+						"mode": map[string]any{
+							"type":        "string",
+							"enum":        []string{"exec", "shell"},
+							"description": "Execution mode. Default is exec. Shell mode runs 'sh -c <command>' explicitly.",
 						},
 					},
 					"required": []string{"command"},
@@ -236,7 +270,7 @@ func GetToolDefault() []models.Tool {
 			Type: "function",
 			Function: models.Function{
 				Name:        "agent_mode",
-				Description: "Enter reasoning agent mode and perform an action",
+				Description: "Enter reasoning agent mode for any request that needs tools or actions (files, commands, external actions). Provide the original user request in 'question'.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{

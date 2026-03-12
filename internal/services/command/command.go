@@ -3,7 +3,6 @@ package command
 import (
 	"bytes"
 	"os/exec"
-	"strings"
 )
 
 type Command struct {
@@ -11,12 +10,7 @@ type Command struct {
 }
 
 func (c *Command) Exec(command string, args ...string) (string, string, int, error) {
-	s := []string{command}
-	s = append(s, args...)
-
-	cmdStr := strings.Join(s, " ")
-
-	cmd := exec.Command("bash", "-c", cmdStr)
+	cmd := exec.Command(command, args...)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -36,4 +30,8 @@ func (c *Command) Exec(command string, args ...string) (string, string, int, err
 	}
 
 	return stdout.String(), stderr.String(), exitCode, nil
+}
+
+func (c *Command) ExecShell(script string) (string, string, int, error) {
+	return c.Exec("sh", "-c", script)
 }
