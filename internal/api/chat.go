@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/nikaydo/personal-assistant/internal/agent"
 	aimodel "github.com/nikaydo/personal-assistant/internal/ai"
@@ -16,14 +17,17 @@ var makeAskFn = func(ai *aimodel.Ai, q string, tools []models.Tool) (models.Resp
 }
 
 func (api *API) chat(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MiB
 	var Query models.Query
-	err := json.NewDecoder(r.Body).Decode(&Query)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	err := dec.Decode(&Query)
 	if err != nil {
 		api.Ai.Logger.Error("chat decode failed:", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if Query.Message == "" {
+	if strings.TrimSpace(Query.Message) == "" {
 		err = fmt.Errorf("message is required")
 		api.Ai.Logger.Error("chat validation failed:", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
