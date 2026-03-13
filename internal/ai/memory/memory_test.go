@@ -5,8 +5,13 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/nikaydo/personal-assistant/internal/config"
 	"github.com/nikaydo/personal-assistant/internal/database"
@@ -246,6 +251,8 @@ func TestSummaryShortMemory_TriggersWhenMessageCountAboveThreshold(t *testing.T)
 	m.ShortTerm = []models.History{
 		{Question: models.ShotTermQuestion{Text: "q1"}, Answer: models.ShotTermAnswer{Text: "a1"}},
 		{Question: models.ShotTermQuestion{Text: "q2"}, Answer: models.ShotTermAnswer{Text: "a2"}},
+		{Question: models.ShotTermQuestion{Text: "q3"}, Answer: models.ShotTermAnswer{Text: "a3"}},
+		{Question: models.ShotTermQuestion{Text: "q4"}, Answer: models.ShotTermAnswer{Text: "a4"}},
 	}
 
 	oldEnqueue := enqueueSummaryFn
@@ -261,7 +268,7 @@ func TestSummaryShortMemory_TriggersWhenMessageCountAboveThreshold(t *testing.T)
 		return models.ResponseBody{}, nil
 	}
 
-	if err := m.SummaryShortMemory(nil, "test-model"); err != nil {
+	if err := m.SummaryShortMemory(&llmcalls.Queue{}, "test-model"); err != nil {
 		t.Fatalf("SummaryShortMemory returned error: %v", err)
 	}
 	if !enqueueCalled {
@@ -280,6 +287,8 @@ func TestSummaryShortMemory_DoesNotDropMessagesOnEnqueueError(t *testing.T) {
 	m.ShortTerm = []models.History{
 		{Question: models.ShotTermQuestion{Text: "q1"}, Answer: models.ShotTermAnswer{Text: "a1"}},
 		{Question: models.ShotTermQuestion{Text: "q2"}, Answer: models.ShotTermAnswer{Text: "a2"}},
+		{Question: models.ShotTermQuestion{Text: "q3"}, Answer: models.ShotTermAnswer{Text: "a3"}},
+		{Question: models.ShotTermQuestion{Text: "q4"}, Answer: models.ShotTermAnswer{Text: "a4"}},
 	}
 
 	oldEnqueue := enqueueSummaryFn
@@ -293,15 +302,15 @@ func TestSummaryShortMemory_DoesNotDropMessagesOnEnqueueError(t *testing.T) {
 		return models.ResponseBody{}, errors.New("queue failed")
 	}
 
-	err := m.SummaryShortMemory(nil, "test-model")
+	err := m.SummaryShortMemory(&llmcalls.Queue{}, "test-model")
 	if err == nil {
 		t.Fatalf("expected SummaryShortMemory error")
 	}
 	if m.Tokens.MessageCount != 4 {
 		t.Fatalf("message count should stay unchanged on error: got=%d want=%d", m.Tokens.MessageCount, 4)
 	}
-	if len(m.ShortTerm) != 2 {
-		t.Fatalf("short memory should stay unchanged on error: got=%d want=%d", len(m.ShortTerm), 2)
+	if len(m.ShortTerm) != 4 {
+		t.Fatalf("short memory should stay unchanged on error: got=%d want=%d", len(m.ShortTerm), 4)
 	}
 }
 
@@ -348,5 +357,193 @@ func TestShortMemoryFill_RespectsTokenLimit(t *testing.T) {
 	}
 	if shortTokens != 6 {
 		t.Fatalf("unexpected short-term tokens: got=%d want=6", shortTokens)
+	}
+}
+
+func TestFillShortMemory_AllowsEmptyChoices(t *testing.T) {
+	m := newTestMemory()
+
+	m.FillShortMemory("q", models.ResponseBody{
+		Model: "m",
+		Usage: models.Usage{TotalTokens: 3},
+	})
+
+	if len(m.ShortTerm) != 1 {
+		t.Fatalf("unexpected short-term size: got=%d want=1", len(m.ShortTerm))
+	}
+	if m.ShortTerm[0].Answer.Text != "" {
+		t.Fatalf("expected empty answer text, got %q", m.ShortTerm[0].Answer.Text)
+	}
+}
+
+func TestLoadState_RecalculatesMessageCountAndSanitizesCoeff(t *testing.T) {
+	m := newTestMemory()
+	stateFile := filepath.Join(t.TempDir(), "memory_state.json")
+	raw := `{
+		"version":"v1",
+		"short_term":[
+			{"question":{"Text":"q1"},"answer":{"Text":"a1","Usage":{}}},
+			{"question":{"Text":"q2"},"answer":{"Text":"a2","Usage":{}}}
+		],
+		"message_count":999,
+		"context_coeff":[-1,0,4]
+	}`
+	if err := os.WriteFile(stateFile, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+
+	if err := m.LoadState(stateFile); err != nil {
+		t.Fatalf("LoadState returned error: %v", err)
+	}
+
+	if m.Tokens.MessageCount != 2 {
+		t.Fatalf("unexpected message count: got=%d want=2", m.Tokens.MessageCount)
+	}
+	if coeff := m.Tokens.ContextCoeffSnapshot(); len(coeff) != 1 || coeff[0] != 4 {
+		t.Fatalf("unexpected coeff snapshot: %v", coeff)
+	}
+}
+
+func TestSaveState_RoundTripSupportedFields(t *testing.T) {
+	m := newTestMemory()
+	m.SystemMemory = &models.SystemSettings{Tone: "neutral"}
+	m.ToolsMemory = &[]models.ToolsHistory{{Name: "tool-a", Content: "ok"}}
+	m.ShortTerm = []models.History{
+		{Question: models.ShotTermQuestion{Text: "q"}, Answer: models.ShotTermAnswer{Text: "a"}},
+	}
+	m.Tokens.MessageCount = 7
+	m.Tokens.SetContextCoeffSnapshot([]float32{2, 4})
+
+	stateFile := filepath.Join(t.TempDir(), "memory_state.json")
+	if err := m.SaveState(stateFile); err != nil {
+		t.Fatalf("SaveState returned error: %v", err)
+	}
+
+	loaded := newTestMemory()
+	if err := loaded.LoadState(stateFile); err != nil {
+		t.Fatalf("LoadState returned error: %v", err)
+	}
+
+	if loaded.SystemMemory == nil || loaded.SystemMemory.Tone != "neutral" {
+		t.Fatalf("unexpected system memory: %#v", loaded.SystemMemory)
+	}
+	if loaded.ToolsMemory == nil || len(*loaded.ToolsMemory) != 1 || (*loaded.ToolsMemory)[0].Name != "tool-a" {
+		t.Fatalf("unexpected tools memory: %#v", loaded.ToolsMemory)
+	}
+	if len(loaded.ShortTerm) != 1 || loaded.ShortTerm[0].Question.Text != "q" {
+		t.Fatalf("unexpected short-term: %#v", loaded.ShortTerm)
+	}
+	if loaded.Tokens.MessageCount != 1 {
+		t.Fatalf("unexpected loaded message count: got=%d want=1", loaded.Tokens.MessageCount)
+	}
+	if coeff := loaded.Tokens.ContextCoeffSnapshot(); len(coeff) != 2 || coeff[0] != 2 || coeff[1] != 4 {
+		t.Fatalf("unexpected loaded coeff: %v", coeff)
+	}
+}
+
+func TestSummaryShortMemory_SerializesConcurrentRuns(t *testing.T) {
+	m := newTestMemory()
+	m.Cfg.ShortMemoryMessagesCount = 1
+	m.Cfg.SummaryMemoryStep = 0
+	m.Tokens.MessageCount = 2
+	m.ShortTerm = []models.History{
+		{Question: models.ShotTermQuestion{Text: "q1"}, Answer: models.ShotTermAnswer{Text: "a1"}},
+		{Question: models.ShotTermQuestion{Text: "q2"}, Answer: models.ShotTermAnswer{Text: "a2"}},
+	}
+
+	oldEnqueue := enqueueSummaryFn
+	oldDetect := detectChosenToolFn
+	t.Cleanup(func() {
+		enqueueSummaryFn = oldEnqueue
+		detectChosenToolFn = oldDetect
+	})
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	enqueueSummaryFn = func(_ *llmcalls.Queue, _ llmcalls.QueueItem) (models.ResponseBody, error) {
+		calls.Add(1)
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return models.ResponseBody{}, nil
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_ = m.SummaryShortMemory(&llmcalls.Queue{}, "model")
+	}()
+	<-started
+	go func() {
+		defer wg.Done()
+		_ = m.SummaryShortMemory(&llmcalls.Queue{}, "model")
+	}()
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("unexpected summary calls: got=%d want=1", got)
+	}
+	if m.Tokens.MessageCount != 1 {
+		t.Fatalf("unexpected message count after summary: got=%d want=1", m.Tokens.MessageCount)
+	}
+}
+
+func TestMessageWithHistory_RespectsSystemAndToolsBudget(t *testing.T) {
+	m := newTestMemory()
+	m.Tokens.ContextCoeff = []float32{1}
+	m.Tokens.SystemPromptPercent = 100
+	m.Tokens.SystemMemoryLimit = 45
+	m.Tokens.ToolsMemoryLimit = 80
+	m.SystemMemory = &models.SystemSettings{
+		Tone:      "neutral",
+		Verbosity: "detailed",
+		Language:  "english",
+	}
+	m.ToolsMemory = &[]models.ToolsHistory{
+		{Name: "tool-1", Content: "ok"},
+	}
+
+	msg := m.MessageWithHistory("q", "sys")
+
+	if len(msg) != 3 {
+		t.Fatalf("unexpected messages count: got=%d want=3", len(msg))
+	}
+	if msg[0].Role != "system" || !strings.Contains(msg[0].Content, "Tone: neutral") {
+		t.Fatalf("unexpected system message: %#v", msg[0])
+	}
+	if strings.Contains(msg[0].Content, "Language: english") {
+		t.Fatalf("expected personalization to be truncated by budget: %q", msg[0].Content)
+	}
+	if msg[1].Role != "" && msg[1].Role != "function" {
+		t.Fatalf("unexpected tools memory message: %#v", msg[1])
+	}
+	if msg[2].Role != "user" || msg[2].Content != "q" {
+		t.Fatalf("unexpected final question message: %#v", msg[2])
+	}
+}
+
+func TestToolsMemoryFill_RespectsBudget(t *testing.T) {
+	m := newTestMemory()
+	m.Tokens.ContextCoeff = []float32{1}
+	m.Tokens.ToolsMemoryLimit = 70
+	m.ToolsMemory = &[]models.ToolsHistory{
+		{Name: "tool-1", Content: strings.Repeat("a", 40)},
+		{Name: "tool-2", Content: strings.Repeat("b", 40)},
+	}
+
+	toolTokens := 0
+	msg := m.ToolsMemoryFill(nil, &toolTokens)
+
+	if len(msg) != 1 {
+		t.Fatalf("unexpected tools messages count: got=%d want=1", len(msg))
+	}
+	if !strings.Contains(msg[0].Content, strings.Repeat("a", 40)) {
+		t.Fatalf("unexpected tool content: %#v", msg[0])
 	}
 }

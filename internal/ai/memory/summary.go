@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/nikaydo/personal-assistant/internal/agent"
@@ -19,6 +20,10 @@ var detectChosenToolFn = func(t *agent.Agent, body models.ResponseBody) error {
 
 func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
 	m.mu.Lock()
+	if m.summaryInFlight {
+		m.mu.Unlock()
+		return nil
+	}
 	targetCount := m.Cfg.ShortMemoryMessagesCount
 	thresholdCount := m.Cfg.ShortMemoryMessagesCount + m.Cfg.SummaryMemoryStep
 
@@ -26,6 +31,18 @@ func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
 		m.mu.Unlock()
 		return nil
 	}
+	if Queue == nil {
+		m.mu.Unlock()
+		m.Logger.Memory("SummaryShortMemory: queue is nil, skipping summarization")
+		return nil
+	}
+	if model == "" {
+		m.mu.Unlock()
+		m.Logger.Memory("SummaryShortMemory: model is empty, skipping summarization")
+		return nil
+	}
+	m.summaryInFlight = true
+	snapshotRevision := m.shortTermRevision
 
 	systemPrompt := strings.TrimSpace(m.Cfg.PromtMemorySummary)
 	if systemPrompt == "" {
@@ -59,10 +76,20 @@ func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
 		Tools:       agent.GetToolLongTerm(),
 	}})
 	if err != nil {
+		m.mu.Lock()
+		m.summaryInFlight = false
+		m.mu.Unlock()
+		if errors.Is(err, llmcalls.ErrQueueStopped) {
+			m.Logger.Memory("SummaryShortMemory: queue stopped, skipping summarization")
+			return nil
+		}
 		return err
 	}
 	if len(respLLM.Choices) > 0 && len(respLLM.Choices[0].Message.ToolCalls) > 0 {
 		if err := detectChosenToolFn(&m.Agent, respLLM); err != nil {
+			m.mu.Lock()
+			m.summaryInFlight = false
+			m.mu.Unlock()
 			return err
 		}
 	} else {
@@ -71,10 +98,17 @@ func (m *Memory) SummaryShortMemory(Queue *llmcalls.Queue, model string) error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer func() {
+		m.summaryInFlight = false
+	}()
+	if snapshotRevision > m.shortTermRevision {
+		return nil
+	}
 	commitCount := countMatchingHistoryPrefix(m.ShortTerm, consumeSnapshot)
 	if commitCount > 0 {
 		m.ShortTerm = m.ShortTerm[commitCount:]
-		m.Tokens.MessageCount = max(m.Tokens.MessageCount-commitCount, 0)
+		m.Tokens.MessageCount = len(m.ShortTerm)
+		m.shortTermRevision++
 	}
 
 	m.Logger.Memory("SummaryShortMemory: summarized short-term memory and updated long-term memory")

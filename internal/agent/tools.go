@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,10 +57,17 @@ func summarize(a *Agent, body models.ResponseBody) error {
 	if a.Dbase == nil {
 		return errors.New("database is nil")
 	}
-	if _, err := a.Dbase.SaveSummary(uuid.New().String(), emb.Data[0].Embedding, args); err != nil {
+	id := summarizeRecordID(args)
+	if _, err := a.Dbase.SaveSummary(id, emb.Data[0].Embedding, args); err != nil {
 		return err
 	}
 	return nil
+}
+
+func summarizeRecordID(args models.SummarizeResponse) string {
+	payload := fmt.Sprintf("%s|%s|%s|%s|%s", args.Category, args.Goal, args.Importance, args.Status, args.Text)
+	sum := sha256.Sum256([]byte(payload))
+	return uuid.NewSHA1(uuid.Nil, sum[:]).String()
 }
 func change_agent_settings(body models.ResponseBody, SystemMemory *models.SystemSettings) error {
 	var args models.SystemSettings

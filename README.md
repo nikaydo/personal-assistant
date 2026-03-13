@@ -32,7 +32,7 @@ Result: more stable, context-aware answers with predictable token budgeting.
 | LLM | OpenRouter chat + embeddings |
 | Memory | In-process short-term + persisted long-term summaries |
 | Storage modes | Local (`PostgreSQL + pgvector`) or Pinecone |
-| Runtime | Request queue, graceful shutdown, HTTP timeouts |
+| Runtime | Request queue, graceful shutdown, HTTP timeouts, local DB auto-migrations |
 
 ---
 
@@ -45,9 +45,9 @@ Result: more stable, context-aware answers with predictable token budgeting.
 | `internal/ai/memory` | Stable | Context assembly + safer summarization commit |
 | `internal/database/localCombinedDB` | Stable | PostgreSQL + pgvector combined storage |
 | `internal/database/pinecone` | Beta | Works when configured; less test depth than local mode |
-| Tool calls in `/chat` flow | Limited | Returns `501` when model emits `tool_calls` |
+| Tool calls in `/chat` flow | Stable | Handles `agent_mode` and executes tool flow inside chat pipeline |
 
-Legend: `Stable` = ready for regular use, `Beta` = usable with caveats, `Limited` = intentionally incomplete.
+Legend: `Stable` = ready for regular use, `Beta` = usable with caveats.
 
 ---
 
@@ -62,13 +62,16 @@ flowchart TD
     B3 --> E1[Create embedding]
     E1 --> E2[Vector search]
     B --> C[OpenRouter chat completion]
-    C --> D[Return answer]
-    D --> F[Store turn in short-term]
-    F --> G{Threshold reached?}
-    G -->|No| H[Done]
-    G -->|Yes| I[Summarize old turns via tool call]
-    I --> J[Persist summary to long-term DB]
-    J --> H
+    C --> D{tool_calls?}
+    D -->|No| E[Return answer]
+    D -->|Yes| F[Run agent/tool flow]
+    F --> E
+    E --> G[Store turn in short-term]
+    G --> H{Threshold reached?}
+    H -->|No| I[Done]
+    H -->|Yes| J[Summarize old turns via tool call]
+    J --> K[Persist summary to long-term DB]
+    K --> I
 ```
 
 ---
@@ -142,26 +145,63 @@ Use one mode at a time.
 - `short_term_percent`
 - `system_prompt_percent`
 
+### 5) LLM retry tuning
+
+- `llm_retry_max_attempts` (default fallback: `3`)
+- `llm_retry_base_delay_ms` (default fallback: `200`)
+- `llm_retry_max_delay_ms` (default fallback: `2000`)
+
+All fields above can be overridden with env vars (`UPPER_SNAKE_CASE`), for example:
+`API_KEY_OPENROUTER`, `LOCAL_POSTGRES_DSN`, `MEMORY_STATE_FILE`, `LLM_RETRY_MAX_ATTEMPTS`.
+
 ---
 
 ## Quick Start
 
-### Local PostgreSQL bootstrap
+### 1) Prepare settings file
 
 ```bash
-psql -U postgres -d postgres -f scripts/postgres_bootstrap.sql
+cp settigns_example.json settings.json
+```
+
+### 2) Local PostgreSQL bootstrap (local mode)
+
+```bash
 psql "$LOCAL_POSTGRES_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-Set `local_postgres_dsn` in `settings.json` or `LOCAL_POSTGRES_DSN`.
+Set `local_postgres_dsn` in `settings.json` (or `LOCAL_POSTGRES_DSN`).
+When the service starts, embedded migrations create/update the summaries table and indexes automatically.
 
-### Run service
+### 3) Run service
 
 ```bash
 go run ./cmd
 ```
 
+Optional log mode:
+
+```bash
+go run ./cmd --log pretty
+```
+
 Server listens at: `http://<api_host>:<api_port>`
+
+---
+
+## Logging
+
+The service always writes logs to a timestamped file in the working directory:
+`YYYY-MM-DD_HH-MM-SS.log`.
+
+Console output mode is controlled by `--log`:
+
+- `--log full` (default): color console output with all log records.
+- `--log pretty`: compact operator-friendly output focused on key events.
+- `--log none`: disable console output (file logging is still enabled).
+
+Main module tags are included via `[MODULE]` (for example: `SYSTEM`, `API`, `AI`, `DB`, `AGENT`).
+Custom levels include `QUESTION`, `ANSWER`, `TASK`, `AGENT`, `MEMORY`.
 
 ---
 
@@ -185,8 +225,8 @@ Status codes:
 
 - `200` success
 - `400` invalid request
+- `413` payload too large (limit: 1 MiB)
 - `500` internal error
-- `501` model returned `tool_calls` not implemented in chat flow
 
 ---
 

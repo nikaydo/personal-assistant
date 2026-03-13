@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/nikaydo/personal-assistant/internal/models"
@@ -20,7 +21,6 @@ type State struct {
 	Version      string                `json:"version"`
 	UpdatedAt    string                `json:"updated_at"`
 	SystemMemory models.SystemSettings `json:"system_memory"`
-	UserProfile  []models.History      `json:"user_profile"`
 	ToolsMemory  []models.ToolsHistory `json:"tools_memory"`
 	ShortTerm    []models.History      `json:"short_term"`
 	MessageCount int                   `json:"message_count"`
@@ -54,7 +54,7 @@ func (m *Memory) snapshotState() State {
 		SystemMemory: system,
 		ToolsMemory:  tools,
 		ShortTerm:    append([]models.History(nil), m.ShortTerm...),
-		MessageCount: m.Tokens.MessageCount,
+		MessageCount: len(m.ShortTerm),
 		ContextCoeff: m.Tokens.ContextCoeffSnapshot(),
 	}
 	return state
@@ -72,9 +72,11 @@ func (m *Memory) applyState(state State) {
 	*m.SystemMemory = state.SystemMemory
 	*m.ToolsMemory = append([]models.ToolsHistory(nil), state.ToolsMemory...)
 	m.ShortTerm = append([]models.History(nil), state.ShortTerm...)
-	m.Tokens.MessageCount = max(state.MessageCount, 0)
-	if len(state.ContextCoeff) > 0 {
-		m.Tokens.SetContextCoeffSnapshot(state.ContextCoeff)
+	m.Tokens.MessageCount = len(m.ShortTerm)
+	m.shortTermRevision++
+	coeff := sanitizeContextCoeff(state.ContextCoeff)
+	if len(coeff) > 0 {
+		m.Tokens.SetContextCoeffSnapshot(coeff)
 	}
 }
 
@@ -133,6 +135,10 @@ func (m *Memory) SaveState(path string) error {
 		_ = tmpFile.Close()
 		return fmt.Errorf("write temp memory state file: %w", err)
 	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("sync temp memory state file: %w", err)
+	}
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("close temp memory state file: %w", err)
 	}
@@ -140,9 +146,35 @@ func (m *Memory) SaveState(path string) error {
 	if err := os.Rename(tmpPath, statePath); err != nil {
 		return fmt.Errorf("replace memory state file: %w", err)
 	}
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("sync memory state dir: %w", err)
+	}
 	return nil
 }
 
 func (m *Memory) FlushState() error {
 	return m.SaveState("")
+}
+
+func sanitizeContextCoeff(coeff []float32) []float32 {
+	if len(coeff) == 0 {
+		return nil
+	}
+
+	out := coeff[:0]
+	for _, value := range coeff {
+		if value > 0 {
+			out = append(out, value)
+		}
+	}
+	return slices.Clone(out)
+}
+
+func syncDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }

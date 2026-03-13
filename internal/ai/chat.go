@@ -68,9 +68,9 @@ func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
 		ai.Logger.Error("MakeAsk:", err)
 		return mod.ResponseBody{}, err
 	}
-	go func() {
-		ai.Memory.Memory(q, respLLM, ai.Queue, ai.Model[0])
-	}()
+	if !ai.Memory.CommitAsync(q, respLLM, ai.Queue, ai.Model[0]) {
+		ai.Logger.Warn("MakeAsk: memory commit skipped", "reason", "memory is shutting down")
+	}
 	ai.Logger.Answer(respLLM)
 	return respLLM, nil
 }

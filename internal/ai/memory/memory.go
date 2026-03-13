@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/nikaydo/personal-assistant/internal/agent"
 	"github.com/nikaydo/personal-assistant/internal/config"
@@ -49,6 +50,11 @@ type Memory struct {
 	Cfg    config.Config
 
 	mu sync.RWMutex
+
+	commitWG          sync.WaitGroup
+	commitsDisabled   atomic.Bool
+	summaryInFlight   bool
+	shortTermRevision uint64
 }
 
 func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmcalls.Queue, model string) {
@@ -68,6 +74,27 @@ func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmc
 			m.Logger.Warn("Memory: failed to persist memory state", "error", err)
 		}
 	}
+}
+
+func (m *Memory) CommitAsync(question string, answer models.ResponseBody, Queue *llmcalls.Queue, model string) bool {
+	if m == nil || m.commitsDisabled.Load() {
+		return false
+	}
+
+	m.commitWG.Add(1)
+	go func() {
+		defer m.commitWG.Done()
+		m.Memory(question, answer, Queue, model)
+	}()
+	return true
+}
+
+func (m *Memory) StopCommitsAndWait() {
+	if m == nil {
+		return
+	}
+	m.commitsDisabled.Store(true)
+	m.commitWG.Wait()
 }
 
 func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
@@ -169,10 +196,10 @@ func (m *Memory) SystemPromptFill(systemPrompt string, msg []models.Message, sys
 		m.Logger.Memory("SystemMemoryFill: system prompt exceeds system prompt percent, skipping system prompt in context", "system_prompt_length", len(systemPrompt), "system_prompt_percent", m.Tokens.SystemPromptPercent, "context_coeff", m.Tokens.GetContextCoeff())
 		return msg
 	}
-	pref := m.SystemMemoryFill()
+	pref, prefTokens, prefSymbols := m.SystemMemoryFill()
 
-	m.Tokens.CountSymbolsInContext += len(systemPrompt) + len(pref)
-	*systemPromptTokens = int(float32(len(systemPrompt)) / m.Tokens.GetContextCoeff())
+	m.Tokens.CountSymbolsInContext += len(systemPrompt) + prefSymbols
+	*systemPromptTokens = int(float32(len(systemPrompt))/m.Tokens.GetContextCoeff()) + prefTokens
 
 	msg = append(msg, models.Message{
 		Role:    "system",
@@ -182,30 +209,55 @@ func (m *Memory) SystemPromptFill(systemPrompt string, msg []models.Message, sys
 	return msg
 }
 
-func (m *Memory) SystemMemoryFill() string {
+func (m *Memory) SystemMemoryFill() (string, int, int) {
 	if m.Tokens.SystemMemoryLimit == 0 {
-		m.Logger.Memory("ToolsMemoryFill: tools memory is disabled, skipping tools memory in context")
-		return ""
+		m.Logger.Memory("SystemMemoryFill: system memory is disabled, skipping personalization in context")
+		return "", 0, 0
+	}
+	if m.SystemMemory == nil {
+		return "", 0, 0
+	}
+
+	coeff := m.Tokens.GetContextCoeff()
+	if coeff <= 0 {
+		coeff = 5
+	}
+	startStr := "\nPersoanalization settings: "
+	headerTokens := int(float32(len(startStr)) / coeff)
+	if headerTokens > m.Tokens.SystemMemoryLimit {
+		m.Logger.Memory("SystemMemoryFill: personalization header exceeds system memory budget")
+		return "", 0, 0
 	}
 
 	var str strings.Builder
-	str.WriteString("")
-	startStr := "\nPersoanalization settings: "
 	args := reflect.ValueOf(m.SystemMemory).Elem()
 	t := args.Type()
+	currentSymbols := len(startStr)
+	currentTokens := headerTokens
 
 	for i := 0; i < args.NumField(); i++ {
 		srcField := args.Field(i)
 
 		if srcField.Kind() == reflect.String && srcField.String() != "" {
-			fmt.Fprintf(&str, "%s: %s. ", t.Field(i).Name, srcField.String())
+			entry := fmt.Sprintf("%s: %s. ", t.Field(i).Name, srcField.String())
+			candidateSymbols := currentSymbols + len(entry)
+			candidateTokens := int(float32(candidateSymbols) / coeff)
+			if candidateTokens > m.Tokens.SystemMemoryLimit {
+				m.Logger.Memory("SystemMemoryFill: personalization budget exhausted", "used_tokens", currentTokens, "limit", m.Tokens.SystemMemoryLimit)
+				break
+			}
+			str.WriteString(entry)
+			currentSymbols = candidateSymbols
+			currentTokens = candidateTokens
 		}
 	}
 	if str.Len() == 0 {
-		return ""
+		return "", 0, 0
 	}
-	return startStr + str.String()
+	content := startStr + str.String()
+	return content, currentTokens, len(content)
 }
+
 func (m *Memory) UserProfileFill(msg []models.Message) []models.Message {
 	if m.Tokens.UserProfileLimit == 0 {
 		m.Logger.Memory("UserProfileFill: user profile memory is disabled, skipping user profile in context")
@@ -219,9 +271,17 @@ func (m *Memory) ToolsMemoryFill(msg []models.Message, toolmemeoryTokens *int) [
 		m.Logger.Memory("ToolsMemoryFill: tools memory is disabled, skipping tools memory in context")
 		return msg
 	}
+	if m.ToolsMemory == nil {
+		return msg
+	}
 	for _, i := range *m.ToolsMemory {
 		data, _ := json.Marshal(i)
-		*toolmemeoryTokens += int(float32(len(data)) / m.Tokens.GetContextCoeff())
+		entryTokens := int(float32(len(data)) / m.Tokens.GetContextCoeff())
+		if *toolmemeoryTokens+entryTokens > m.Tokens.ToolsMemoryLimit {
+			m.Logger.Memory("ToolsMemoryFill: tools memory budget exhausted", "used_tokens", *toolmemeoryTokens, "limit", m.Tokens.ToolsMemoryLimit)
+			break
+		}
+		*toolmemeoryTokens += entryTokens
 		msg = append(msg, models.Message{
 			Role:      i.Role,
 			Type:      i.Type,
@@ -374,12 +434,17 @@ func (m *Memory) ShortMemoryFill(msg []models.Message, ShortTermTokens *int) []m
 func (m *Memory) FillShortMemory(question string, answer models.ResponseBody) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	answerText := ""
+	if len(answer.Choices) > 0 {
+		answerText = answer.Choices[0].Message.Content
+	}
 	m.ShortTerm = append(m.ShortTerm, models.History{
 		Question: models.ShotTermQuestion{Text: question},
-		Answer:   models.ShotTermAnswer{Text: answer.Choices[0].Message.Content, Usage: answer.Usage},
+		Answer:   models.ShotTermAnswer{Text: answerText, Usage: answer.Usage},
 		Model:    answer.Model,
 		Id:       answer.ID,
 		Created:  answer.Created,
 	})
 	m.Tokens.MessageCount++
+	m.shortTermRevision++
 }

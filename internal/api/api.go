@@ -68,21 +68,22 @@ func (api *API) Start() error {
 func (api *API) Shutdown(ctx context.Context) error {
 	var errs []error
 
-	if api.Ai != nil && api.Ai.Queue != nil {
-		api.Ai.Queue.Stop()
+	if api.server != nil {
+		if err := api.server.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errs = append(errs, err)
+		}
 	}
 	if api.Ai != nil && api.Ai.Memory != nil {
+		api.Ai.Memory.StopCommitsAndWait()
 		if err := api.Ai.Memory.FlushState(); err != nil {
 			errs = append(errs, err)
 		}
 	}
+	if api.Ai != nil && api.Ai.Queue != nil {
+		api.Ai.Queue.Stop()
+	}
 	if api.Ai != nil && api.Ai.Memory != nil && api.Ai.Memory.DBase != nil {
 		if err := api.Ai.Memory.DBase.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if api.server != nil {
-		if err := api.server.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs = append(errs, err)
 		}
 	}

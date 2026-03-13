@@ -6,7 +6,7 @@
 ![Memory](https://img.shields.io/badge/Memory-Short%20%2B%20Long-F59E0B)
 ![Status](https://img.shields.io/badge/Status-Active-22C55E)
 
-> Локальный Go-сервис для чата через OpenRouter с многоуровневой памятью (system-prompt + user-profile + tools-history + short-term + long-term ) и переключаемым векторным хранилищем.
+> Локальный Go-сервис для чата через OpenRouter с многоуровневой памятью (system-prompt + user-profile + tools-history + short-term + long-term) и переключаемым векторным хранилищем.
 
 [English version](README.md)
 
@@ -32,7 +32,7 @@
 | LLM | OpenRouter chat + embeddings |
 | Память | short-term в процессе + long-term summary в БД |
 | Режимы хранения | Local (`PostgreSQL + pgvector`) или Pinecone |
-| Runtime | Очередь запросов, graceful shutdown, HTTP timeouts |
+| Runtime | Очередь запросов, graceful shutdown, HTTP таймауты, auto-migrations для local DB |
 
 ---
 
@@ -45,9 +45,9 @@
 | `internal/ai/memory` | Stable | Сборка контекста + безопасный commit суммаризации |
 | `internal/database/localCombinedDB` | Stable | Комбинация PostgreSQL + pgvector |
 | `internal/database/pinecone` | Beta | Работает при конфиге, но покрытие ниже local mode |
-| Tool calls в `/chat` flow | Limited | При `tool_calls` возвращается `501` |
+| Tool calls в `/chat` flow | Stable | Обрабатывает `agent_mode` и выполняет tool flow внутри chat pipeline |
 
-Легенда: `Stable` = подходит для регулярного использования, `Beta` = можно использовать с оговорками, `Limited` = намеренно неполная реализация.
+Легенда: `Stable` = подходит для регулярного использования, `Beta` = можно использовать с оговорками.
 
 ---
 
@@ -62,13 +62,16 @@ flowchart TD
     B3 --> E1[Создание embedding]
     E1 --> E2[Векторный поиск]
     B --> C[OpenRouter chat completion]
-    C --> D[Ответ клиенту]
-    D --> F[Сохранение в short-term]
-    F --> G{Порог достигнут?}
-    G -->|Нет| H[Готово]
-    G -->|Да| I[Суммаризация старых сообщений tool-call]
-    I --> J[Сохранение summary в long-term БД]
-    J --> H
+    C --> D{tool_calls?}
+    D -->|Нет| E[Ответ клиенту]
+    D -->|Да| F[Запуск agent/tool flow]
+    F --> E
+    E --> G[Сохранение в short-term]
+    G --> H{Порог достигнут?}
+    H -->|Нет| I[Готово]
+    H -->|Да| J[Суммаризация старых сообщений tool-call]
+    J --> K[Сохранение summary в long-term БД]
+    K --> I
 ```
 
 ---
@@ -125,6 +128,7 @@ internal/logg                        # структурный логгер
 ### 4) Память и промпты
 
 - `promt_system_chat`
+- `promt_system_agent` *(опционально)* – инструкции для agent/reasoning режима; при пустом значении используется встроенный prompt.
 - `promt_memory_summary`
 - `memory_summary_user_promt`
 - `context_limit`
@@ -141,26 +145,63 @@ internal/logg                        # структурный логгер
 - `short_term_percent`
 - `system_prompt_percent`
 
+### 5) Параметры retry для LLM
+
+- `llm_retry_max_attempts` (fallback по умолчанию: `3`)
+- `llm_retry_base_delay_ms` (fallback по умолчанию: `200`)
+- `llm_retry_max_delay_ms` (fallback по умолчанию: `2000`)
+
+Все поля можно переопределить env-переменными (`UPPER_SNAKE_CASE`), например:
+`API_KEY_OPENROUTER`, `LOCAL_POSTGRES_DSN`, `MEMORY_STATE_FILE`, `LLM_RETRY_MAX_ATTEMPTS`.
+
 ---
 
 ## Быстрый старт
 
-### Подготовка PostgreSQL (local mode)
+### 1) Подготовить файл настроек
 
 ```bash
-psql -U postgres -d postgres -f scripts/postgres_bootstrap.sql
+cp settigns_example.json settings.json
+```
+
+### 2) Подготовка PostgreSQL (local mode)
+
+```bash
 psql "$LOCAL_POSTGRES_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-Укажи `local_postgres_dsn` в `settings.json` или `LOCAL_POSTGRES_DSN`.
+Укажи `local_postgres_dsn` в `settings.json` (или `LOCAL_POSTGRES_DSN`).
+При старте сервиса встроенные миграции автоматически создают/обновляют таблицу summaries и индексы.
 
-### Запуск
+### 3) Запуск
 
 ```bash
 go run ./cmd
 ```
 
+Опциональный режим вывода логов:
+
+```bash
+go run ./cmd --log pretty
+```
+
 Сервис слушает: `http://<api_host>:<api_port>`
+
+---
+
+## Логирование
+
+Сервис всегда пишет логи в файл с таймстампом в рабочей директории:
+`YYYY-MM-DD_HH-MM-SS.log`.
+
+Режим консольного вывода задается флагом `--log`:
+
+- `--log full` (по умолчанию): цветной консольный вывод со всеми записями.
+- `--log pretty`: компактный операторский формат с акцентом на ключевые события.
+- `--log none`: отключает консольный вывод (запись в файл остается).
+
+Логи содержат тег модуля `[MODULE]` (например: `SYSTEM`, `API`, `AI`, `DB`, `AGENT`).
+Используются кастомные уровни: `QUESTION`, `ANSWER`, `TASK`, `AGENT`, `MEMORY`.
 
 ---
 
@@ -184,8 +225,21 @@ go run ./cmd
 
 - `200` успех
 - `400` невалидный запрос
+- `413` payload слишком большой (лимит: 1 MiB)
 - `500` внутренняя ошибка
-- `501` модель вернула `tool_calls`, не реализованные в chat flow
+
+---
+
+## Production Checklist
+
+- [ ] Добавить authentication/authorization перед API
+- [ ] Ограничить или отключить `/memory` и `/msg` в prod
+- [ ] Хранить секреты через env/secret manager (не в `settings.json`)
+- [ ] Добавить rate limiting и лимиты размера body
+- [ ] Добавить health endpoint и readiness checks
+- [ ] Настроить централизованные логи и алерты
+- [ ] Добавить integration-тесты полного `/chat` flow
+- [ ] Определить backup/retention policy для long-term storage
 
 ---
 
@@ -193,6 +247,5 @@ go run ./cmd
 
 - `settings.json` хранится в открытом виде.
 - Не коммить реальные ключи и токены.
-- Открытая информация в `/memory` и `/msg`.
+- Ограничивай доступ к `/memory` и `/msg` в production.
 
- 
