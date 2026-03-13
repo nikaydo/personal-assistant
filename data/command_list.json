@@ -1,0 +1,50 @@
+{
+    "type":"denied",
+    "commands": {
+        "rm": null,
+        "mv": null,
+        "dd": null,
+        "mkfs": null,
+        "fdisk": null,
+        "parted": null,
+        "mount": null,
+        "umount": null,
+        "chmod": null,
+        "chown": null,
+        "chattr": null,
+        "ln": null,
+
+        "sudo": null,
+        "su": null,
+        "passwd": null,
+        "useradd": null,
+        "userdel": null,
+        "usermod": null,
+
+        "shutdown": null,
+        "reboot": null,
+        "poweroff": null,
+        "systemctl": null,
+        "service": null,
+        "kill": null,
+        "killall": null,
+        "pkill": null,
+
+        "curl": null,
+        "wget": null,
+        "nc": null,
+        "ncat": null,
+        "netcat": null,
+        "telnet": null,
+        "ssh": null,
+        "scp": null,
+        "rsync": null,
+        
+        "bash": null,
+        "sh": null,
+
+        "docker": null,
+        "kubectl": null,
+        "helm": null
+  }
+}

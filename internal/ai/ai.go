@@ -1,7 +1,9 @@
 package ai
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/nikaydo/personal-assistant/internal/agent"
@@ -11,6 +13,7 @@ import (
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
 	"github.com/nikaydo/personal-assistant/internal/logg"
 	"github.com/nikaydo/personal-assistant/internal/models"
+	"github.com/nikaydo/personal-assistant/internal/services/command"
 )
 
 var getModelDataFn = llmcalls.GetModelData
@@ -33,6 +36,14 @@ type Ai struct {
 func Init(config config.Config, aiLog *logg.Logger, db *database.Database) *Ai {
 	queue := llmcalls.NewQueue(config, 64, aiLog.WithModule("QUEUE"))
 	queue.QueueStart()
+	cmd, err := command.NewService()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			aiLog.Warn("command list not exist")
+		} else {
+			aiLog.Warn("command list not loaded", "error", err)
+		}
+	}
 	agent := agent.Agent{
 		Steps:        50,
 		Model:        config.ModelOpenRouter[0],
@@ -41,6 +52,7 @@ func Init(config config.Config, aiLog *logg.Logger, db *database.Database) *Ai {
 		Cfg:          config,
 		Logger:       aiLog.WithModule("AGENT"),
 		History:      &[]models.Message{},
+		Cmd:          cmd,
 		SystemPrompt: config.PromtSystemAgent, // may be empty
 	}
 	// if the user hasn't provided an explicit agent prompt fall back to a

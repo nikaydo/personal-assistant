@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/google/shlex"
@@ -22,14 +23,14 @@ import (
 // Service holds state that is shared between invocations, currently only
 // the working directory as modified by "cd" commands.
 type Service struct {
-	cmd *Command
+	cmd     *Command
+	CmdList CommandList
 }
 
 // type if true then its allowed list if false its blocklist
 type CommandList struct {
-	Type       bool
-	AskAllowed bool
-	List       map[string][]string
+	Type bool                `json:"type"`
+	List map[string][]string `json:"commands"`
 }
 
 type CommandSpec struct {
@@ -50,12 +51,12 @@ type ToolResult struct {
 var catAppendWithoutInputRe = regexp.MustCompile(`(?m)^\s*cat\s*>>`)
 var shellRedirectTargetRe = regexp.MustCompile(`(?:>>|>)\s*['"]?([^'" \n;|&]+)['"]?`)
 
-func CheckCommand(cmdToExec string, args []string, c CommandList) bool {
-	switch c.Type {
+func (s *Service) CheckCommand(cmdToExec string, args []string) bool {
+	switch s.CmdList.Type {
 	//allowed to execute
 	//if command in List then command allowed to execute
 	case true:
-		allowedArgs, ok := c.List[cmdToExec]
+		allowedArgs, ok := s.CmdList.List[cmdToExec]
 		if ok {
 			if allowedArgs == nil {
 				return true
@@ -72,7 +73,7 @@ func CheckCommand(cmdToExec string, args []string, c CommandList) bool {
 	//denied to execute
 	//if command not in list then allowed to execute
 	case false:
-		_, ok := c.List[cmdToExec]
+		_, ok := s.CmdList.List[cmdToExec]
 		if !ok {
 			return true
 		}
@@ -83,8 +84,24 @@ func CheckCommand(cmdToExec string, args []string, c CommandList) bool {
 }
 
 // NewService returns a ready-to-use command service.
-func NewService() *Service {
-	return &Service{cmd: &Command{}}
+func NewService() (*Service, error) {
+	list, err := LoadCommandList()
+	if err != nil {
+		return &Service{}, err
+	}
+	return &Service{cmd: &Command{}, CmdList: list}, nil
+}
+
+func LoadCommandList() (CommandList, error) {
+	b, err := os.ReadFile("./data/command_list.json")
+	if err != nil {
+		return CommandList{}, err
+	}
+	var c CommandList
+	if err := json.Unmarshal(b, &c); err != nil {
+		return CommandList{}, err
+	}
+	return c, nil
 }
 
 func (s *Service) ExecuteFromLLM(raw string, cList CommandList) ToolResult {
@@ -112,7 +129,7 @@ func (s *Service) ExecuteSpec(spec CommandSpec, cList CommandList) ToolResult {
 	}
 	switch mode {
 	case "exec":
-		if !CheckCommand(spec.Command, spec.Args, cList) {
+		if !s.CheckCommand(spec.Command, spec.Args) {
 			result.Error = "Command not allowed"
 			return result
 		}
@@ -127,7 +144,7 @@ func (s *Service) ExecuteSpec(spec CommandSpec, cList CommandList) ToolResult {
 		}
 	case "shell":
 		// shell mode is explicit and executes script via "sh -c".
-		if err := validateShellScript(spec.Command); err != nil {
+		if err := s.validateAndAuthorizeShellScript(spec.Command); err != nil {
 			result.Error = err.Error()
 			result.Retryable = false
 			return result
@@ -181,6 +198,138 @@ func validateShellScript(script string) error {
 		return errors.New("invalid shell script: 'cat >> file' requires input (use heredoc or printf)")
 	}
 	return nil
+}
+
+func (s *Service) validateAndAuthorizeShellScript(script string) error {
+	if err := validateShellScript(script); err != nil {
+		return err
+	}
+	commands, err := parseShellTopLevelCommands(script)
+	if err != nil {
+		return err
+	}
+	for _, cmd := range commands {
+		spec := normalizeExecSpec(cmd)
+		if spec.Command == "" {
+			continue
+		}
+		if !s.CheckCommand(spec.Command, spec.Args) {
+			return fmt.Errorf("Command not allowed")
+		}
+	}
+	return nil
+}
+
+func parseShellTopLevelCommands(script string) ([]CommandSpec, error) {
+	var (
+		buf         strings.Builder
+		commands    []CommandSpec
+		inSingle    bool
+		inDouble    bool
+		escaped     bool
+		scriptRunes = []rune(script)
+	)
+	flush := func() error {
+		part := strings.TrimSpace(buf.String())
+		buf.Reset()
+		if part == "" {
+			return nil
+		}
+		argv, err := shlex.Split(part)
+		if err != nil {
+			return fmt.Errorf("invalid shell segment %s: %w", strconv.Quote(part), err)
+		}
+		if len(argv) == 0 {
+			return nil
+		}
+		commands = append(commands, CommandSpec{
+			Command: argv[0],
+			Args:    argv[1:],
+			Mode:    "exec",
+		})
+		return nil
+	}
+
+	for i := 0; i < len(scriptRunes); i++ {
+		ch := scriptRunes[i]
+		next := rune(0)
+		if i+1 < len(scriptRunes) {
+			next = scriptRunes[i+1]
+		}
+
+		if escaped {
+			buf.WriteRune(ch)
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' {
+			buf.WriteRune(ch)
+			escaped = true
+			continue
+		}
+
+		if !inSingle && ch == '"' {
+			inDouble = !inDouble
+			buf.WriteRune(ch)
+			continue
+		}
+		if !inDouble && ch == '\'' {
+			inSingle = !inSingle
+			buf.WriteRune(ch)
+			continue
+		}
+
+		if !inSingle && !inDouble {
+			if ch == '`' {
+				return nil, errors.New("blocked shell construct: backticks are not allowed")
+			}
+			if ch == '$' && next == '(' {
+				return nil, errors.New("blocked shell construct: command substitution is not allowed")
+			}
+			if ch == '(' || ch == ')' {
+				return nil, errors.New("blocked shell construct: subshell is not allowed")
+			}
+			if ch == ';' || ch == '\n' {
+				if err := flush(); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			if ch == '&' && next == '&' {
+				if err := flush(); err != nil {
+					return nil, err
+				}
+				i++
+				continue
+			}
+			if ch == '|' && next == '|' {
+				if err := flush(); err != nil {
+					return nil, err
+				}
+				i++
+				continue
+			}
+			if ch == '|' {
+				if err := flush(); err != nil {
+					return nil, err
+				}
+				continue
+			}
+		}
+		buf.WriteRune(ch)
+	}
+
+	if escaped || inSingle || inDouble {
+		return nil, errors.New("invalid shell script: unterminated escape or quote")
+	}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	if len(commands) == 0 {
+		return nil, errors.New("empty shell script")
+	}
+	return commands, nil
 }
 
 func extractShellRedirectTarget(script string) (string, bool) {

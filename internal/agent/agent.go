@@ -34,6 +34,8 @@ type Agent struct {
 	SystemPrompt string
 
 	History *[]models.Message
+
+	Cmd *command.Service
 }
 
 type History struct {
@@ -461,8 +463,7 @@ func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
 		}
 		normalizedArgs := marshalCommandSpec(spec)
 		a.Logger.Agent("agent tool", "tool", args.Func.Function, "args", normalizedArgs)
-		svc := command.NewService()
-		data := svc.ExecuteSpec(spec, services.CommandList{Type: false})
+		data := a.Cmd.ExecuteSpec(spec, services.CommandList{Type: false})
 		if !data.Ok {
 			a.Logger.Warn("command execution failed", "error", data.Error, "exit_code", data.ExitCode)
 		}
@@ -473,8 +474,7 @@ func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
 		return string(b), false, nil
 	case "command":
 		a.Logger.Agent("agent tool", "tool", i.Function.Name, "args", i.Function.Arguments)
-		svc := command.NewService()
-		data := svc.ExecuteFromLLM(i.Function.Arguments, services.CommandList{Type: false})
+		data := a.Cmd.ExecuteFromLLM(i.Function.Arguments, services.CommandList{Type: false})
 		if !data.Ok {
 			a.Logger.Warn("command execution failed", "error", data.Error, "exit_code", data.ExitCode)
 		}
