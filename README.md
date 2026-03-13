@@ -6,7 +6,7 @@
 ![Memory](https://img.shields.io/badge/Memory-Short%20%2B%20Long-F59E0B)
 ![Status](https://img.shields.io/badge/Status-Active-22C55E)
 
-> Local Go service for OpenRouter chat with layered memory (system-prompt + user-profile + tools-history + short-term + long-term ) and pluggable vector storage.
+> Local-first Go agent: safe to run on personal devices and designed to optimize every token in large-context workflows.
 
 [Русская версия](README.ru.md)
 
@@ -14,13 +14,23 @@
 
 ## Why This Project
 
-Instead of a plain chat proxy, this service builds a memory-aware context on each request:
+Frontier models now provide context windows of up to millions of tokens, but that does not make agents cheap or safe by default.
+If an agent regularly consumes even ~20-30% of a huge context window, call cost grows fast.
+And many existing agent setups require running on a VPS, which increases exposure for personal data and infrastructure.
+
+Project philosophy:
+
+- run safely on personal machines and other devices without mandatory remote hosting
+- treat every token as expensive (tight context budgeting and summarization)
+- keep security practical via local execution and transparent memory architecture
+
+To achieve this, each request is assembled from layered context:
 
 - system prompt budget
 - recent dialog turns (short-term memory)
 - retrieved long-term summaries (vector search)
 
-Result: more stable, context-aware answers with predictable token budgeting.
+Result: more stable responses, predictable cost, and local-first security.
 
 ---
 
@@ -230,22 +240,21 @@ Status codes:
 
 ---
 
-## Production Checklist
+## Improvement Ideas
 
-- [ ] Add authentication/authorization in front of API
-- [ ] Restrict or disable `/memory` and `/msg` in prod
-- [ ] Store secrets via environment/secret manager (not in `settings.json`)
-- [ ] Add request rate limiting and body size limits
-- [ ] Add health endpoint and readiness checks
-- [ ] Configure centralized logs and alerting
-- [ ] Add integration tests for full `/chat` flow
-- [ ] Define backup/retention policy for long-term storage
+### Stability Improvements
 
----
+- Add API authentication/authorization and per-token rate limiting.
+- Add `GET /healthz` and `GET /readyz` with database and model checks.
+- Add integration tests for full `/chat` + memory + tool flow.
+- Add metrics endpoint (Prometheus) for queue depth, latency, and error rates.
 
-## Security Notes
+### Functional Improvements
 
-- `settings.json` is plaintext.
-- Do not commit real API keys/tokens.
-- Protect `/memory` and `/msg` in production.
- 
+- Add configurable retention and archive strategy for long-term summaries.
+- Add role-based access control for debug endpoints (`/memory`, `/msg`).
+- Add support for multiple memory profiles per user/session.
+
+### Features
+
+- Add SSE/streaming responses for long model outputs.

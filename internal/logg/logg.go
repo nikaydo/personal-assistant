@@ -3,8 +3,10 @@ package logg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"os"
 	"regexp"
@@ -123,8 +125,17 @@ func InitLoggerWithMode(mode string) *Logger {
 		mode = "full"
 	}
 	logFileName := time.Now().Format("2006-01-02_15-04-05") + ".log"
+	if _, err := os.ReadDir("./data/log"); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if err := os.Mkdir("data/logs", 0o755); err != nil {
+				log.Println(err)
+			}
 
-	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		} else {
+			log.Println("logs cant make directory", err)
+		}
+	}
+	logFile, err := os.OpenFile(fmt.Sprintf("./data/logs/%s", logFileName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	var fileHandler slog.Handler
 	if err == nil {
 		fileHandler = NewPlainHandler(logFile, minLogLevel)

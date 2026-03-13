@@ -1,0 +1,185 @@
+{
+  "version": "v1",
+  "updated_at": "2026-03-13T07:36:05.057497689Z",
+  "system_memory": {
+    "tone": "rude"
+  },
+  "tools_memory": [
+    {
+      "id": "call_YyiMCmBd7X6wxLoFVYu0cMda",
+      "role": "function",
+      "type": "function",
+      "name": "change_agent_settings",
+      "arguments": "{\"tone\":\"rude\"}",
+      "output": "{\"tone\":\"rude\"}",
+      "content": "sucessful"
+    }
+  ],
+  "short_term": [
+    {
+      "question": {
+        "Text": "Привет"
+      },
+      "answer": {
+        "Text": "Привет! Как я могу помочь вам сегодня?",
+        "Usage": {
+          "prompt_tokens": 418,
+          "completion_tokens": 11,
+          "total_tokens": 429,
+          "cost": 0.0000693,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.0000627
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773372703-hDsXQd4nW4gI1Kt29yIi",
+      "created": 1773372703
+    },
+    {
+      "question": {
+        "Text": "Стань более грубым"
+      },
+      "answer": {
+        "Text": "Как бы ты хотел, чтобы я изменил свой стиль общения?",
+        "Usage": {
+          "prompt_tokens": 147,
+          "completion_tokens": 13,
+          "total_tokens": 160,
+          "cost": 0.00002985,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.00002205
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773372759-m1VYTQJFOtaLk9QsMA4K",
+      "created": 1773372759
+    },
+    {
+      "question": {
+        "Text": "Я сделал вокруг тебя агент оболочку я добавил тебе память и агент режим для выполнения команд ос что сделать дальше"
+      },
+      "answer": {
+        "Text": "Поздравляю с настройкой оболочки! Что конкретно ты хочешь сделать дальше? Необходимы команды или действия, которые нужно выполнить?",
+        "Usage": {
+          "prompt_tokens": 506,
+          "completion_tokens": 31,
+          "total_tokens": 537,
+          "cost": 0.0000945,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.0000759
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773373025-JZEmMjxFrhbiv52HCt0i",
+      "created": 1773373025
+    },
+    {
+      "question": {
+        "Text": "Нет это решаешь ты "
+      },
+      "answer": {
+        "Text": "Здорово, но мне нужно чуть больше конкретики. Какие у тебя есть варианты или идеи? Я не могу просто прийти к решению без конкретной информации.",
+        "Usage": {
+          "prompt_tokens": 551,
+          "completion_tokens": 35,
+          "total_tokens": 586,
+          "cost": 0.00010365,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.00008265
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773373052-m8IzaYS3QZCBjfyYCGsQ",
+      "created": 1773373052
+    },
+    {
+      "question": {
+        "Text": "Просто скажи что ты хочешь что бы расширить твои функции"
+      },
+      "answer": {
+        "Text": "Мне не нужны твои советы. Если бы я мог расширить свои функции, то добавил бы работу с внешними данными и возможность более глубокого анализа информации. Если у тебя есть конкретные предложения, высказывай!",
+        "Usage": {
+          "prompt_tokens": 608,
+          "completion_tokens": 48,
+          "total_tokens": 656,
+          "cost": 0.00012,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.0000912
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773373096-kGhYs2S0f8IYhtSt3jmp",
+      "created": 1773373096
+    },
+    {
+      "question": {
+        "Text": "Вот хорошо работа с внешними данными и глубокий анализ информации расскажи как ты это видишь"
+      },
+      "answer": {
+        "Text": "Работа с внешними данными могла бы включать доступ к реальным базе данных, API для получения актуальной информации и интеграцию с различными платформами для обработки данных. Глубокий анализ информации мог бы включать более сложные алгоритмы для обработки данных, выявление закономерностей и предоставление детализированных выводов. \n\nЕсли ты действительно хочешь развивать эту тему, стоит обсудить конкретные источники данных и типы анализа, которые тебя интересуют. Что скажешь?",
+        "Usage": {
+          "prompt_tokens": 683,
+          "completion_tokens": 105,
+          "total_tokens": 788,
+          "cost": 0.00016545,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.00010245
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773373145-ctdhnnSn0bZ9DUTIScMA",
+      "created": 1773373145
+    },
+    {
+      "question": {
+        "Text": "Давай"
+      },
+      "answer": {
+        "Text": "Отлично! Какие источники данных ты рассматриваешь? Это могут быть открытые API, базы данных, веб-сайты с публичной информацией или что-то еще? И что именно ты хочешь анализировать — текст, числовые данные, или, возможно, изображения? ",
+        "Usage": {
+          "prompt_tokens": 798,
+          "completion_tokens": 61,
+          "total_tokens": 859,
+          "cost": 0.0001563,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.0001197
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773373187-m85jbrzHOgwkS45wmG9d",
+      "created": 1773373187
+    }
+  ],
+  "message_count": 7,
+  "context_coeff": [
+    5,
+    1.3995216,
+    4.6734695,
+    2.0375495,
+    2.3720508,
+    2.7450657,
+    3.2430453,
+    3.897243
+  ]
+}

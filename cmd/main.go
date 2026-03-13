@@ -27,7 +27,7 @@ func main() {
 
 	l := logg.InitLoggerWithMode(logMode)
 	l.WithModule("SYSTEM").Info("Starting application")
-	config, err := config.ConfigRead("./settings.json")
+	config, err := config.ConfigRead("./data/settings.json")
 	if err != nil {
 		l.WithModule("SYSTEM").Error("Failed to read config:", err)
 		return
