@@ -86,11 +86,19 @@ func (s *Service) CheckCommand(cmdToExec string, args []string) bool {
 
 // NewService returns a ready-to-use command service.
 func NewService() (*Service, error) {
+	svc := &Service{
+		cmd: &Command{},
+		CmdList: CommandList{
+			Type: false,
+			List: map[string][]string{},
+		},
+	}
 	list, err := LoadCommandList()
 	if err != nil {
-		return &Service{}, err
+		return svc, err
 	}
-	return &Service{cmd: &Command{}, CmdList: list}, nil
+	svc.CmdList = list
+	return svc, nil
 }
 
 func LoadCommandList() (CommandList, error) {
@@ -121,6 +129,10 @@ func (s *Service) ExecuteSpec(spec CommandSpec, cList CommandList) ToolResult {
 	result := ToolResult{
 		Ok:       false,
 		ExitCode: -1,
+	}
+	if s == nil || s.cmd == nil {
+		result.Error = "command service is not initialized"
+		return result
 	}
 	spec = normalizeExecSpec(spec)
 	mode := normalizeMode(spec.Mode)

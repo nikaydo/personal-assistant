@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"math"
 	"sync"
 
 	"github.com/nikaydo/personal-assistant/internal/config"
@@ -49,7 +50,8 @@ func (ct *ContextTokens) GetContextCoeff() float32 {
 	if count == 0 {
 		return 5
 	}
-	return totalCoeff / float32(count)
+	avg := totalCoeff / float32(count)
+	return clampCoeff(avg)
 }
 
 func (ct *ContextTokens) ContextCoeffSnapshot() []float32 {
@@ -83,6 +85,10 @@ func (ct *ContextTokens) ContextCoeffCalc(symbolsInContext int, body models.Resp
 	if tokensUsed <= 0 {
 		return
 	}
+	// Avoid outlier updates when the prompt side is too small to infer a stable ratio.
+	if tokensUsed < 32 {
+		return
+	}
 
 	window := ct.ContextCoeffCount
 	if window <= 0 {
@@ -92,8 +98,20 @@ func (ct *ContextTokens) ContextCoeffCalc(symbolsInContext int, body models.Resp
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
-	ct.ContextCoeff = append(ct.ContextCoeff, float32(symbolsInContext)/float32(tokensUsed))
+	next := clampCoeff(float32(symbolsInContext) / float32(tokensUsed))
+	ct.ContextCoeff = append(ct.ContextCoeff, next)
 	if len(ct.ContextCoeff) > window {
 		ct.ContextCoeff = ct.ContextCoeff[len(ct.ContextCoeff)-window:]
 	}
+}
+
+func clampCoeff(v float32) float32 {
+	if v <= 0 {
+		return 5
+	}
+	const (
+		minCoeff = 1.0
+		maxCoeff = 8.0
+	)
+	return float32(math.Max(minCoeff, math.Min(maxCoeff, float64(v))))
 }

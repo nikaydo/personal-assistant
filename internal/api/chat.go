@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/nikaydo/personal-assistant/internal/agent"
 	aimodel "github.com/nikaydo/personal-assistant/internal/ai"
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
@@ -34,7 +33,7 @@ func (api *API) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.Ai.Logger.Info("chat request accepted", "message_len", len(Query.Message), "type", Query.Type)
-	msg, err := makeAskFn(api.Ai, Query.Message, agent.GetToolDefault())
+	msg, err := makeAskFn(api.Ai, Query.Message, nil)
 	if err != nil {
 		api.Ai.Logger.Error("chat processing failed:", err)
 		status := http.StatusInternalServerError

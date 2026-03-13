@@ -424,6 +424,13 @@ func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
 }
 
 func (a *Agent) RunTool(body models.ResponseBody) (string, bool, error) {
+	if a.Cmd == nil {
+		svc, err := command.NewService()
+		if err != nil {
+			a.Logger.Warn("RunTool: command list not loaded, using empty policy", "error", err)
+		}
+		a.Cmd = svc
+	}
 	if len(body.Choices) == 0 || len(body.Choices[0].Message.ToolCalls) == 0 {
 		if body.Choices[0].FinishReason == "stop" {
 			return body.Choices[0].Message.Content, true, nil

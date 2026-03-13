@@ -1,5 +1,6 @@
 settings.json
 secret.json
+memory_state.json
 data/logs
 *.log
 docs

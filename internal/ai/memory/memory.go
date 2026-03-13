@@ -3,6 +3,7 @@ package memory
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"sync"
@@ -16,7 +17,10 @@ import (
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
-const longTermTopK = 20
+const (
+	defaultLongTermTopK = 6
+	maxLongTermTopK     = 8
+)
 
 var createEmbeddingFn = llmcalls.CreateEmbending
 var searchByVectorFn = func(db *database.Database, vector []float32, topK int) ([]models.SummarizeResponse, error) {
@@ -55,6 +59,40 @@ type Memory struct {
 	commitsDisabled   atomic.Bool
 	summaryInFlight   bool
 	shortTermRevision uint64
+	lastEstimate      PromptEstimate
+}
+
+type BuildOptions struct {
+	IncludeLongTerm    bool
+	IncludeToolsMemory bool
+}
+
+type PromptEstimate struct {
+	SystemPromptTokens int
+	LongTermTokens     int
+	ShortTermTokens    int
+	QuestionTokens     int
+	ToolsMemoryTokens  int
+	TotalTokens        int
+	LongTermInvoked    bool
+	ToolsInvoked       bool
+	LongTermReason     string
+}
+
+type ContextBudgetPlan struct {
+	ContextLimit        int
+	QuestionTokens      int
+	SystemTokensBudget  int
+	ToolsTokensBudget   int
+	ShortTokensEstimate int
+	LongTermTokenBudget int
+}
+
+func DefaultBuildOptions() BuildOptions {
+	return BuildOptions{
+		IncludeLongTerm:    true,
+		IncludeToolsMemory: true,
+	}
 }
 
 func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmcalls.Queue, model string) {
@@ -69,6 +107,30 @@ func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmc
 	m.mu.RUnlock()
 	m.Tokens.ContextCoeffCalc(symbolsInContext, answer)
 	m.Logger.Memory("ContextCoeffCalc: calculated context coefficient", "context_coeff", fmt.Sprintf("%v/[%v]", m.Tokens.GetContextCoeff(), m.Tokens.ContextCoeffSnapshot()), "total_tokens", answer.Usage.TotalTokens, "symbols_in_context", symbolsInContext)
+	m.mu.RLock()
+	estimate := m.lastEstimate
+	m.mu.RUnlock()
+	if estimate.TotalTokens > 0 && answer.Usage.PromptTokens > 0 {
+		wasteRatio := float64(answer.Usage.PromptTokens) / math.Max(1, float64(answer.Usage.CompletionTokens))
+		m.Logger.Memory(
+			"TokenTelemetry: estimate_vs_actual",
+			"estimated_prompt_tokens_by_block", map[string]int{
+				"system_prompt": estimate.SystemPromptTokens,
+				"long_term":     estimate.LongTermTokens,
+				"short_term":    estimate.ShortTermTokens,
+				"question":      estimate.QuestionTokens,
+				"tools_memory":  estimate.ToolsMemoryTokens,
+				"total":         estimate.TotalTokens,
+			},
+			"actual_prompt_tokens", answer.Usage.PromptTokens,
+			"actual_completion_tokens", answer.Usage.CompletionTokens,
+			"actual_total_tokens", answer.Usage.TotalTokens,
+			"waste_ratio", fmt.Sprintf("%.2f", wasteRatio),
+			"long_term_invoked", estimate.LongTermInvoked,
+			"long_term_reason", estimate.LongTermReason,
+			"tools_memory_invoked", estimate.ToolsInvoked,
+		)
+	}
 	if err := m.SaveState(""); err != nil {
 		if m.Logger != nil {
 			m.Logger.Warn("Memory: failed to persist memory state", "error", err)
@@ -98,8 +160,12 @@ func (m *Memory) StopCommitsAndWait() {
 }
 
 func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
-	longTermContent, longTermMsgTokens, longTermSymbols := m.prepareLongTermMemoryMessage(q)
+	return m.MessageWithHistoryWithOptions(q, systemPrompt, DefaultBuildOptions())
+}
 
+func (m *Memory) MessageWithHistoryWithOptions(q, systemPrompt string, opts BuildOptions) []models.Message {
+	budget, shortTermCount := m.PlanContextBudget(q)
+	longTermContent, longTermMsgTokens, longTermSymbols, longTermUsed, longTermReason := m.prepareLongTermMemoryMessage(q, shortTermCount, budget.LongTermTokenBudget, opts)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	messages := []models.Message{}
@@ -110,7 +176,9 @@ func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
 	//добавляем в историю сообщения из информации о пользователе
 	messages = m.UserProfileFill(messages)
 	//добавляем в историю сообщения из истории выполнения функций
-	messages = m.ToolsMemoryFill(messages, toolsmemoryTokens)
+	if opts.IncludeToolsMemory {
+		messages = m.ToolsMemoryFill(messages, toolsmemoryTokens)
+	}
 	//добавляем в историю сообщения из долгосрочной памяти
 	if longTermContent != "" {
 		messages = append(messages, models.Message{
@@ -132,55 +200,175 @@ func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
 		m.Tokens.CountSymbolsInContext += len(q)
 		questionTokens = int(float32(len(q)) / m.Tokens.GetContextCoeff())
 	}
+	estimate := PromptEstimate{
+		SystemPromptTokens: *systemPromptTokens,
+		LongTermTokens:     *longTermTokens,
+		ShortTermTokens:    *shortTermTokens,
+		QuestionTokens:     questionTokens,
+		ToolsMemoryTokens:  *toolsmemoryTokens,
+		TotalTokens:        *systemPromptTokens + *longTermTokens + *shortTermTokens + questionTokens + *toolsmemoryTokens,
+		LongTermInvoked:    longTermUsed,
+		ToolsInvoked:       opts.IncludeToolsMemory && *toolsmemoryTokens > 0,
+		LongTermReason:     longTermReason,
+	}
+	m.lastEstimate = estimate
 	m.Logger.Memory("MessageWithHistory: prepared messages with history for LLM request",
 		"system_prompt_tokens", *systemPromptTokens,
 		"long_term_tokens", *longTermTokens,
 		"short_term_tokens", *shortTermTokens,
 		"question_tokens", questionTokens,
 		"tools_memory_Tokens", toolsmemoryTokens,
-		"total_context_tokens", *systemPromptTokens+*longTermTokens+*shortTermTokens+questionTokens+*toolsmemoryTokens,
+		"total_context_tokens", estimate.TotalTokens,
 		"context_limit", m.Tokens.ContextLimit,
 		"context_coeff", m.Tokens.ContextCoeffSnapshot(),
+		"long_term_invoked", longTermUsed,
+		"long_term_reason", longTermReason,
 	)
 	m.Logger.Info("Memory with history", "messages_count", len(messages))
 	return messages
 }
 
-func (m *Memory) prepareLongTermMemoryMessage(question string) (string, int, int) {
+func (m *Memory) PlanContextBudget(question string) (ContextBudgetPlan, int) {
+	m.mu.RLock()
+	shortTermCount := len(m.ShortTerm)
+	shortEstimate := m.estimateShortTermTokensNoLock()
+	m.mu.RUnlock()
+
+	coeff := m.Tokens.GetContextCoeff()
+	if coeff <= 0 {
+		coeff = 5
+	}
+	questionTokens := 0
+	if strings.TrimSpace(question) != "" {
+		questionTokens = int(float32(len(question)) / coeff)
+	}
+	systemBudget := max(m.Tokens.SystemPromptPercent, 0) + max(m.Tokens.SystemMemoryLimit, 0)
+	toolsBudget := 0
+	if m.ToolsMemory != nil {
+		toolsBudget = max(m.Tokens.ToolsMemoryLimit, 0)
+	}
+	remaining := m.Tokens.ContextLimit - (questionTokens + systemBudget + toolsBudget + shortEstimate)
+	if m.Tokens.ContextLimit <= 0 {
+		remaining = m.Tokens.LongTermLimit
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	longBudget := min(m.Tokens.LongTermLimit, remaining)
+	if longBudget < 0 {
+		longBudget = 0
+	}
+
+	return ContextBudgetPlan{
+		ContextLimit:        m.Tokens.ContextLimit,
+		QuestionTokens:      questionTokens,
+		SystemTokensBudget:  systemBudget,
+		ToolsTokensBudget:   toolsBudget,
+		ShortTokensEstimate: shortEstimate,
+		LongTermTokenBudget: longBudget,
+	}, shortTermCount
+}
+
+func (m *Memory) prepareLongTermMemoryMessage(question string, shortTermCount, tokenBudget int, opts BuildOptions) (string, int, int, bool, string) {
+	enabled, reason := m.shouldRetrieveLongTerm(question, shortTermCount, opts)
+	if !enabled {
+		m.Logger.Memory("LongTermMemoryFill: adaptive retrieval disabled", "reason", reason)
+		return "", 0, 0, false, reason
+	}
+	if tokenBudget <= 0 {
+		m.Logger.Memory("LongTermMemoryFill: token budget exhausted")
+		return "", 0, 0, false, "budget_exhausted"
+	}
 	if m.Tokens.LongTermLimit == 0 {
 		m.Logger.Memory("LongTermMemoryFill: long-term memory is disabled, skipping long-term memory in context")
-		return "", 0, 0
+		return "", 0, 0, false, "long_term_limit_disabled"
 	}
 	if question == "" {
 		m.Logger.Memory("LongTermMemoryFill: question is empty, skipping long-term memory in context")
-		return "", 0, 0
+		return "", 0, 0, false, "question_empty"
 	}
 	if m.DBase == nil {
 		m.Logger.Memory("LongTermMemoryFill: database is nil, skipping long-term memory in context")
-		return "", 0, 0
+		return "", 0, 0, false, "db_nil"
 	}
 
 	emb, err := createEmbeddingFn(question, m.Cfg)
 	if err != nil {
 		m.Logger.Error("LongTermMemoryFill: failed to create embedding, skipping long-term memory:", err)
-		return "", 0, 0
+		return "", 0, 0, false, "embedding_error"
 	}
 	if len(emb.Data) == 0 || len(emb.Data[0].Embedding) == 0 {
 		m.Logger.Memory("LongTermMemoryFill: embedding response is empty, skipping long-term memory in context")
-		return "", 0, 0
+		return "", 0, 0, false, "empty_embedding"
 	}
 
-	summaries, err := searchByVectorFn(m.DBase, emb.Data[0].Embedding, longTermTopK)
+	topK := m.dynamicLongTermTopK(question, shortTermCount)
+	summaries, err := searchByVectorFn(m.DBase, emb.Data[0].Embedding, topK)
 	if err != nil {
 		m.Logger.Error("LongTermMemoryFill: failed to search long-term memory, skipping long-term memory:", err)
-		return "", 0, 0
+		return "", 0, 0, false, "search_error"
 	}
-	content, tokens, symbols := m.buildLongTermBlock(summaries)
+	content, tokens, symbols := m.buildLongTermBlockWithinLimit(summaries, tokenBudget)
 	if content == "" {
 		m.Logger.Memory("LongTermMemoryFill: no long-term memory matched context limits")
-		return "", 0, 0
+		return "", 0, 0, false, "no_matches_within_budget"
 	}
-	return content, tokens, symbols
+	return content, tokens, symbols, true, reason
+}
+
+func (m *Memory) shouldRetrieveLongTerm(question string, shortTermCount int, opts BuildOptions) (bool, string) {
+	if !opts.IncludeLongTerm {
+		return false, "long_term_disabled_by_options"
+	}
+	q := strings.TrimSpace(strings.ToLower(question))
+	if q == "" {
+		return false, "empty_question"
+	}
+	if len(q) > 120 {
+		return true, "long_question"
+	}
+	if shortTermCount == 0 {
+		return true, "no_short_term_context"
+	}
+	if shortTermCount <= 2 {
+		return true, "limited_short_term_context"
+	}
+	if len(q) < 24 {
+		return false, "short_local_question"
+	}
+	referenceMarkers := []string{
+		"remember", "previous", "earlier", "before", "you said",
+		"напомни", "раньше", "до этого", "ты говорил", "предыдущ",
+	}
+	for _, marker := range referenceMarkers {
+		if strings.Contains(q, marker) {
+			return true, "historical_reference"
+		}
+	}
+	return false, "short_term_sufficient"
+}
+
+func (m *Memory) dynamicLongTermTopK(question string, shortTermCount int) int {
+	qLen := len(strings.TrimSpace(question))
+	topK := defaultLongTermTopK
+	switch {
+	case qLen > 220:
+		topK = 8
+	case qLen > 120:
+		topK = 7
+	case qLen < 30:
+		topK = 3
+	}
+	if shortTermCount == 0 {
+		topK += 1
+	}
+	if topK > maxLongTermTopK {
+		topK = maxLongTermTopK
+	}
+	if topK < 2 {
+		topK = 2
+	}
+	return topK
 }
 
 func (m *Memory) SystemPromptFill(systemPrompt string, msg []models.Message, systemPromptTokens *int) []models.Message {
@@ -320,7 +508,7 @@ func (m *Memory) LongTermMemoryFill(question string, msg []models.Message, longT
 		return msg
 	}
 
-	summaries, err := searchByVectorFn(m.DBase, emb.Data[0].Embedding, longTermTopK)
+	summaries, err := searchByVectorFn(m.DBase, emb.Data[0].Embedding, m.dynamicLongTermTopK(question, len(m.ShortTerm)))
 	if err != nil {
 		m.Logger.Error("LongTermMemoryFill: failed to search long-term memory, skipping long-term memory:", err)
 		return msg
@@ -341,7 +529,14 @@ func (m *Memory) LongTermMemoryFill(question string, msg []models.Message, longT
 }
 
 func (m *Memory) buildLongTermBlock(summaries []models.SummarizeResponse) (string, int, int) {
+	return m.buildLongTermBlockWithinLimit(summaries, m.Tokens.LongTermLimit)
+}
+
+func (m *Memory) buildLongTermBlockWithinLimit(summaries []models.SummarizeResponse, tokenLimit int) (string, int, int) {
 	if len(summaries) == 0 {
+		return "", 0, 0
+	}
+	if tokenLimit <= 0 {
 		return "", 0, 0
 	}
 	coeff := m.Tokens.GetContextCoeff()
@@ -350,7 +545,7 @@ func (m *Memory) buildLongTermBlock(summaries []models.SummarizeResponse) (strin
 	}
 
 	header := "Long-term conversation memory:\n"
-	if int(float32(len(header))/coeff) > m.Tokens.LongTermLimit {
+	if int(float32(len(header))/coeff) > tokenLimit {
 		return "", 0, 0
 	}
 
@@ -366,7 +561,7 @@ func (m *Memory) buildLongTermBlock(summaries []models.SummarizeResponse) (strin
 		line := fmt.Sprintf("%d. %s\n", added+1, text)
 		candidateSymbols := currentSymbols + len(line)
 		candidateTokens := int(float32(candidateSymbols) / coeff)
-		if candidateTokens > m.Tokens.LongTermLimit {
+		if candidateTokens > tokenLimit {
 			break
 		}
 		b.WriteString(line)
@@ -380,6 +575,23 @@ func (m *Memory) buildLongTermBlock(summaries []models.SummarizeResponse) (strin
 	content := strings.TrimRight(b.String(), "\n")
 	tokens := int(float32(len(content)) / coeff)
 	return content, tokens, len(content)
+}
+
+func (m *Memory) estimateShortTermTokensNoLock() int {
+	coeff := m.Tokens.GetContextCoeff()
+	if coeff <= 0 {
+		coeff = 5
+	}
+	total := 0
+	for i := len(m.ShortTerm) - 1; i >= 0; i-- {
+		symbols := len(m.ShortTerm[i].Question.Text) + len(m.ShortTerm[i].Answer.Text)
+		pairTokens := int(float32(symbols) / coeff)
+		if total+pairTokens > m.Tokens.ShortTermLimit {
+			break
+		}
+		total += pairTokens
+	}
+	return total
 }
 
 func (m *Memory) ShortMemoryFill(msg []models.Message, ShortTermTokens *int) []models.Message {

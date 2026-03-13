@@ -195,6 +195,56 @@ func TestBuildLongTermBlock_RespectsTokenBudget(t *testing.T) {
 	}
 }
 
+func TestShouldRetrieveLongTerm_AdaptiveRules(t *testing.T) {
+	m := newTestMemory()
+	enabled, reason := m.shouldRetrieveLongTerm("как мы решили вопрос раньше?", 3, DefaultBuildOptions())
+	if !enabled {
+		t.Fatalf("expected retrieval enabled for historical reference, reason=%s", reason)
+	}
+
+	enabled, reason = m.shouldRetrieveLongTerm("ok", 4, DefaultBuildOptions())
+	if enabled {
+		t.Fatalf("expected retrieval disabled for short local question, reason=%s", reason)
+	}
+
+	enabled, reason = m.shouldRetrieveLongTerm("расскажи подробнее про архитектуру сервиса и компромиссы", 0, DefaultBuildOptions())
+	if !enabled {
+		t.Fatalf("expected retrieval enabled when short-term context is empty, reason=%s", reason)
+	}
+}
+
+func TestDynamicLongTermTopK_Capped(t *testing.T) {
+	m := newTestMemory()
+	k := m.dynamicLongTermTopK(strings.Repeat("a", 400), 0)
+	if k > 8 {
+		t.Fatalf("expected topK capped by 8, got %d", k)
+	}
+	if k < 2 {
+		t.Fatalf("expected topK >= 2, got %d", k)
+	}
+}
+
+func TestPlanContextBudget_ProducesNonNegativeBudgets(t *testing.T) {
+	m := newTestMemory()
+	m.Tokens.ContextLimit = 500
+	m.Tokens.SystemPromptPercent = 100
+	m.Tokens.SystemMemoryLimit = 50
+	m.Tokens.ToolsMemoryLimit = 50
+	m.Tokens.ShortTermLimit = 150
+	m.Tokens.LongTermLimit = 200
+	m.ShortTerm = []models.History{
+		{Question: models.ShotTermQuestion{Text: "q1"}, Answer: models.ShotTermAnswer{Text: "a1"}},
+	}
+
+	plan, _ := m.PlanContextBudget("hello")
+	if plan.LongTermTokenBudget < 0 {
+		t.Fatalf("expected non-negative long-term budget, got %d", plan.LongTermTokenBudget)
+	}
+	if plan.QuestionTokens < 0 {
+		t.Fatalf("expected non-negative question tokens, got %d", plan.QuestionTokens)
+	}
+}
+
 func TestMessageWithHistory_LongTermSoftFallbackOnErrors(t *testing.T) {
 	t.Run("embedding error", func(t *testing.T) {
 		m := newTestMemory()
@@ -320,8 +370,8 @@ func TestContextCoeffCalc_UsesConfiguredWindowAndSkipsZeroTokens(t *testing.T) {
 		ContextCoeffCount: 2,
 	}
 
-	ct.ContextCoeffCalc(10, models.ResponseBody{Usage: models.Usage{TotalTokens: 2}})
-	ct.ContextCoeffCalc(20, models.ResponseBody{Usage: models.Usage{TotalTokens: 4}})
+	ct.ContextCoeffCalc(160, models.ResponseBody{Usage: models.Usage{TotalTokens: 32}})
+	ct.ContextCoeffCalc(320, models.ResponseBody{Usage: models.Usage{TotalTokens: 64}})
 	ct.ContextCoeffCalc(999, models.ResponseBody{Usage: models.Usage{TotalTokens: 0}})
 
 	coeffs := ct.ContextCoeffSnapshot()
