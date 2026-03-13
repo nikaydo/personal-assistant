@@ -128,9 +128,10 @@ func InitLoggerWithMode(mode string) *Logger {
 	if _, err := os.ReadDir("./data/log"); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if err := os.Mkdir("data/logs", 0o755); err != nil {
-				log.Println(err)
+				if !errors.Is(err, os.ErrExist) {
+					log.Println(err)
+				}
 			}
-
 		} else {
 			log.Println("logs cant make directory", err)
 		}

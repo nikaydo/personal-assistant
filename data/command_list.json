@@ -1,5 +1,5 @@
 {
-    "type":"denied",
+    "type":false,
     "commands": {
         "rm": null,
         "mv": null,
@@ -39,7 +39,7 @@
         "ssh": null,
         "scp": null,
         "rsync": null,
-        
+
         "bash": null,
         "sh": null,
 

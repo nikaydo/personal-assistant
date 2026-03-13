@@ -55,6 +55,7 @@ func (s *Service) CheckCommand(cmdToExec string, args []string) bool {
 	switch s.CmdList.Type {
 	//allowed to execute
 	//if command in List then command allowed to execute
+	//but if argument not in list of arguments command decline
 	case true:
 		allowedArgs, ok := s.CmdList.List[cmdToExec]
 		if ok {

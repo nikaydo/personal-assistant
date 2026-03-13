@@ -1,6 +1,6 @@
 {
   "version": "v1",
-  "updated_at": "2026-03-13T07:36:05.057497689Z",
+  "updated_at": "2026-03-13T08:27:04.514417665Z",
   "system_memory": {
     "tone": "rude"
   },
@@ -169,9 +169,53 @@
       "model": "openai/gpt-4o-mini",
       "id": "gen-1773373187-m85jbrzHOgwkS45wmG9d",
       "created": 1773373187
+    },
+    {
+      "question": {
+        "Text": "Привет можешь создать файл hello.txt?"
+      },
+      "answer": {
+        "Text": "Файл hello.txt успешно создан и в него записан текст 'Hello, World!'.",
+        "Usage": {
+          "prompt_tokens": 605,
+          "completion_tokens": 30,
+          "total_tokens": 635,
+          "cost": 0.00010875,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.00009075
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773390342-8d5KAGkSSnqbAH1Z8QNd",
+      "created": 1773390342
+    },
+    {
+      "question": {
+        "Text": "Привет можешь создать файл hello.txt?"
+      },
+      "answer": {
+        "Text": "Файл hello.txt успешно создан.",
+        "Usage": {
+          "prompt_tokens": 446,
+          "completion_tokens": 19,
+          "total_tokens": 465,
+          "cost": 0.0000783,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.0000669
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773390386-6jtdOIfYkgK7bnhHhalU",
+      "created": 1773390386
     }
   ],
-  "message_count": 7,
+  "message_count": 9,
   "context_coeff": [
     5,
     1.3995216,
@@ -180,6 +224,8 @@
     2.3720508,
     2.7450657,
     3.2430453,
-    3.897243
+    3.897243,
+    5.9355373,
+    8.419283
   ]
 }
