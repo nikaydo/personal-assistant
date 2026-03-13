@@ -51,6 +51,38 @@ func TestExecuteSpec_ExitCodeFailureSetsError(t *testing.T) {
 	}
 }
 
+func TestExecuteSpec_RepairsExecCommandWithFlags(t *testing.T) {
+	svc := NewService()
+	out := svc.ExecuteSpec(CommandSpec{
+		Command: "printf %s",
+		Args:    []string{"ok"},
+		Mode:    "exec",
+	}, CommandList{Type: false})
+	if !out.Ok {
+		t.Fatalf("expected repaired exec command to succeed, got: %+v", out)
+	}
+	if out.Stdout != "ok" {
+		t.Fatalf("unexpected stdout: %q", out.Stdout)
+	}
+}
+
+func TestExecuteSpec_ShellStderrIsFailure(t *testing.T) {
+	svc := NewService()
+	out := svc.ExecuteSpec(CommandSpec{
+		Command: "printf ok >&2",
+		Mode:    "shell",
+	}, CommandList{Type: false})
+	if out.Ok {
+		t.Fatalf("expected shell stderr to be treated as failure, got: %+v", out)
+	}
+	if out.Error == "" {
+		t.Fatalf("expected error from shell stderr, got: %+v", out)
+	}
+	if !out.Retryable {
+		t.Fatalf("expected retryable shell failure, got: %+v", out)
+	}
+}
+
 func TestExecuteSpec_ShellCatAppendWithoutInputRejected(t *testing.T) {
 	svc := NewService()
 	spec := CommandSpec{

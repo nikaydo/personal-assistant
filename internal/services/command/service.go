@@ -104,6 +104,7 @@ func (s *Service) ExecuteSpec(spec CommandSpec, cList CommandList) ToolResult {
 		Ok:       false,
 		ExitCode: -1,
 	}
+	spec = normalizeExecSpec(spec)
 	mode := normalizeMode(spec.Mode)
 	if spec.Command == "" {
 		result.Error = "empty command"
@@ -138,6 +139,11 @@ func (s *Service) ExecuteSpec(spec CommandSpec, cList CommandList) ToolResult {
 		if err != nil {
 			result.Error = err.Error()
 			result.Retryable = false
+			return result
+		}
+		if strings.TrimSpace(stderr) != "" {
+			result.Error = strings.TrimSpace(stderr)
+			result.Retryable = true
 			return result
 		}
 	default:
@@ -200,6 +206,23 @@ func normalizeMode(mode string) string {
 	return strings.ToLower(strings.TrimSpace(mode))
 }
 
+func normalizeExecSpec(spec CommandSpec) CommandSpec {
+	if normalizeMode(spec.Mode) != "exec" {
+		return spec
+	}
+	cmd := strings.TrimSpace(spec.Command)
+	if cmd == "" || !strings.ContainsAny(cmd, " \t") {
+		return spec
+	}
+	parts, err := shlex.Split(cmd)
+	if err != nil || len(parts) == 0 {
+		return spec
+	}
+	spec.Command = parts[0]
+	spec.Args = append(parts[1:], spec.Args...)
+	return spec
+}
+
 // parse decodes the raw input into a command name and argument slice.
 func (s *Service) parse(raw string) (CommandSpec, error) {
 
@@ -220,7 +243,7 @@ func (s *Service) parse(raw string) (CommandSpec, error) {
 			}
 			return CommandSpec{}, errors.New("invalid shell command payload: use mode=shell with script or sh -c <script>")
 		}
-		return CommandSpec{Command: j.Command, Args: j.Args, Mode: mode}, nil
+		return normalizeExecSpec(CommandSpec{Command: j.Command, Args: j.Args, Mode: mode}), nil
 	}
 
 	args, err := shlex.Split(raw)

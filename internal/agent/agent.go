@@ -50,7 +50,9 @@ type AgentResponse struct {
 
 type Func struct {
 	Function  string          `json:"function"`
+	Command   string          `json:"command,omitempty"`
 	Mode      string          `json:"mode,omitempty"`
+	Script    string          `json:"script,omitempty"`
 	Arguments json.RawMessage `json:"arguments,omitempty"`
 	Args      json.RawMessage `json:"args,omitempty"`
 }
@@ -58,6 +60,23 @@ type Func struct {
 func rawProvided(raw json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(raw)
 	return len(trimmed) > 0 && string(trimmed) != "null"
+}
+
+func normalizeExecSpec(spec command.CommandSpec) command.CommandSpec {
+	if strings.ToLower(strings.TrimSpace(spec.Mode)) != "exec" {
+		return spec
+	}
+	cmd := strings.TrimSpace(spec.Command)
+	if cmd == "" || !strings.ContainsAny(cmd, " \t") {
+		return spec
+	}
+	parts, err := shlex.Split(cmd)
+	if err != nil || len(parts) == 0 {
+		return spec
+	}
+	spec.Command = parts[0]
+	spec.Args = append(parts[1:], spec.Args...)
+	return spec
 }
 
 func normalizeActionFunction(functionName string, hasPayload bool) (string, error) {
@@ -80,7 +99,10 @@ func normalizeActionFunction(functionName string, hasPayload bool) (string, erro
 }
 
 func normalizeCommandSpec(resp AgentResponse) (command.CommandSpec, error) {
-	hasPayload := rawProvided(resp.Func.Arguments) || rawProvided(resp.Func.Args)
+	hasDirectCommand := strings.TrimSpace(resp.Func.Command) != ""
+	hasDirectScript := strings.TrimSpace(resp.Func.Script) != ""
+	hasDirectPayload := hasDirectCommand || hasDirectScript
+	hasPayload := rawProvided(resp.Func.Arguments) || rawProvided(resp.Func.Args) || hasDirectPayload
 	fn, err := normalizeActionFunction(resp.Func.Function, hasPayload)
 	if err != nil {
 		return command.CommandSpec{}, err
@@ -90,6 +112,12 @@ func normalizeCommandSpec(resp AgentResponse) (command.CommandSpec, error) {
 	}
 	if rawProvided(resp.Func.Arguments) && rawProvided(resp.Func.Args) {
 		return command.CommandSpec{}, errors.New("conflicting action payload: both arguments and args are provided")
+	}
+	if rawProvided(resp.Func.Arguments) && hasDirectPayload {
+		return command.CommandSpec{}, errors.New("conflicting action payload: direct command/script cannot be combined with arguments")
+	}
+	if hasDirectScript && rawProvided(resp.Func.Args) {
+		return command.CommandSpec{}, errors.New("conflicting action payload: script cannot be combined with args")
 	}
 	mode := strings.ToLower(strings.TrimSpace(resp.Func.Mode))
 	if mode == "" {
@@ -163,6 +191,28 @@ func normalizeCommandSpec(resp AgentResponse) (command.CommandSpec, error) {
 	switch {
 	case rawProvided(resp.Func.Arguments):
 		source = resp.Func.Arguments
+	case strings.TrimSpace(resp.Func.Script) != "":
+		if mode != "shell" {
+			return command.CommandSpec{}, errors.New("script payload requires shell mode")
+		}
+		spec := command.CommandSpec{Mode: "shell", Command: strings.TrimSpace(resp.Func.Script)}
+		return spec, nil
+	case strings.TrimSpace(resp.Func.Command) != "":
+		spec := command.CommandSpec{Mode: mode, Command: strings.TrimSpace(resp.Func.Command)}
+		var args []string
+		if rawProvided(resp.Func.Args) {
+			if err := json.Unmarshal(resp.Func.Args, &args); err == nil {
+				spec.Args = args
+			}
+		}
+		spec = normalizeExecSpec(spec)
+		if mode == "shell" && len(spec.Args) > 0 {
+			return command.CommandSpec{}, errors.New("shell command does not support top-level args; use script string or sh -c payload")
+		}
+		if strings.TrimSpace(spec.Command) == "" {
+			return command.CommandSpec{}, errors.New("command action resolved to empty command")
+		}
+		return spec, nil
 	case rawProvided(resp.Func.Args):
 		source = resp.Func.Args
 	default:
@@ -172,6 +222,7 @@ func normalizeCommandSpec(resp AgentResponse) (command.CommandSpec, error) {
 	if err != nil {
 		return command.CommandSpec{}, err
 	}
+	spec = normalizeExecSpec(spec)
 	if strings.TrimSpace(spec.Mode) == "" {
 		spec.Mode = mode
 	}
@@ -204,11 +255,11 @@ func normalizeRawCommandCall(raw string) string {
 		if mode == "" {
 			mode = "exec"
 		}
-		return marshalCommandSpec(command.CommandSpec{
+		return marshalCommandSpec(normalizeExecSpec(command.CommandSpec{
 			Command: strings.TrimSpace(obj.Command),
 			Args:    obj.Args,
 			Mode:    mode,
-		})
+		}))
 	}
 	parts, err := shlex.Split(trimmed)
 	if err != nil || len(parts) == 0 {

@@ -134,6 +134,31 @@ func TestNormalizeCommandSpec_ArgsObject(t *testing.T) {
 	}
 }
 
+func TestNormalizeCommandSpec_TopLevelCommandAndArgs(t *testing.T) {
+	r := mustAgentResponse(t, `{"thought":"t","action":{"function":"command","command":"echo","args":["ok"],"mode":"exec"}}`)
+	spec, err := normalizeCommandSpec(r)
+	if err != nil {
+		t.Fatalf("normalizeCommandSpec failed: %v", err)
+	}
+	if spec.Command != "echo" || len(spec.Args) != 1 || spec.Args[0] != "ok" || spec.Mode != "exec" {
+		t.Fatalf("unexpected spec: %+v", spec)
+	}
+}
+
+func TestNormalizeCommandSpec_RepairsExecCommandWithFlags(t *testing.T) {
+	r := mustAgentResponse(t, `{"thought":"t","action":{"function":"command","arguments":{"command":"ls -lt","args":["*.log"],"mode":"exec"}}}`)
+	spec, err := normalizeCommandSpec(r)
+	if err != nil {
+		t.Fatalf("normalizeCommandSpec failed: %v", err)
+	}
+	if spec.Command != "ls" {
+		t.Fatalf("expected command ls, got: %+v", spec)
+	}
+	if len(spec.Args) != 2 || spec.Args[0] != "-lt" || spec.Args[1] != "*.log" {
+		t.Fatalf("unexpected args: %+v", spec)
+	}
+}
+
 func TestNormalizeCommandSpec_FunctionWithPrefix(t *testing.T) {
 	r := mustAgentResponse(t, `{"thought":"t","action":{"function":"functions.command","arguments":{"command":"echo","args":["ok"]}}}`)
 	spec, err := normalizeCommandSpec(r)
