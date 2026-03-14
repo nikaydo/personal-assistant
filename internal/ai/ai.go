@@ -104,6 +104,7 @@ func (ai *Ai) makeBody(messages []models.Message, tools []models.Tool) models.Re
 	if len(tools) > 0 {
 		body.Tools = tools
 	}
+	llmcalls.ApplyWebSearch(&body, ai.Config)
 	return body
 }
 

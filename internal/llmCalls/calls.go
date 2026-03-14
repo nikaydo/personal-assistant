@@ -20,11 +20,11 @@ var httpClient = &http.Client{
 }
 
 func Ask(body models.RequestBody, cfg config.Config) (models.ResponseBody, error) {
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return models.ResponseBody{}, err
+	respBody, err := askOnce(body, cfg)
+	if err != nil && shouldRetryWithoutWebSearchOptions(body, err) {
+		body.WebSearchOptions = nil
+		respBody, err = askOnce(body, cfg)
 	}
-	respBody, err := doReqWithRetry(jsonBody, cfg.ApiUrlOpenrouter, cfg.ApiKeyOpenrouter, "POST", cfg)
 	if err != nil {
 		return models.ResponseBody{}, err
 	}
@@ -34,6 +34,22 @@ func Ask(body models.RequestBody, cfg config.Config) (models.ResponseBody, error
 		return models.ResponseBody{}, err
 	}
 	return response, nil
+}
+
+func askOnce(body models.RequestBody, cfg config.Config) ([]byte, error) {
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	return doReqWithRetry(jsonBody, cfg.ApiUrlOpenrouter, cfg.ApiKeyOpenrouter, "POST", cfg)
+}
+
+func shouldRetryWithoutWebSearchOptions(body models.RequestBody, err error) bool {
+	if err == nil || body.WebSearchOptions == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "web_search_options") || strings.Contains(msg, "web search options not supported")
 }
 
 func CreateEmbending(input string, cfg config.Config) (models.EmbendingResponse, error) {

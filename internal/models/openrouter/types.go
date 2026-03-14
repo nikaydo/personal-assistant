@@ -15,8 +15,18 @@ type RequestBody struct {
 	Provider              Provider              `json:"provider"`
 	PreferedMinThroughput PreferedMinThroughput `json:"prefered_min_throughput"`
 	Tools                 []toolmodels.Tool     `json:"tools,omitempty"`
+	Plugins               []Plugin              `json:"plugins,omitempty"`
+	WebSearchOptions      *WebSearchOptions     `json:"web_search_options,omitempty"`
 	Input                 string                `json:"input,omitempty"`
 	ToolsChoise           any                   `json:"tool_choice,omitempty"`
+}
+
+type Plugin struct {
+	ID string `json:"id"`
+}
+
+type WebSearchOptions struct {
+	SearchContextSize string `json:"search_context_size,omitempty"`
 }
 
 type EmbendingRequest struct {

@@ -615,12 +615,7 @@ func (a *Agent) AskLLM(ToolsChoise string) (models.ResponseBody, error) {
 		}
 	}
 
-	respLLM, err := a.Queue.AddToQueue(llmcalls.QueueItem{Body: models.RequestBody{
-		Model:       a.Model,
-		Messages:    *a.History,
-		ToolsChoise: ToolsChoise,
-		Tools:       GetAgentTool(),
-	}})
+	respLLM, err := a.Queue.AddToQueue(llmcalls.QueueItem{Body: a.makeBody(*a.History, GetAgentTool(), ToolsChoise)})
 	if err != nil {
 		return models.ResponseBody{}, err
 	}

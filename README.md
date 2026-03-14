@@ -4,7 +4,9 @@
 ![API](https://img.shields.io/badge/API-HTTP%20JSON-2D7FF9)
 ![Storage](https://img.shields.io/badge/Storage-Local%20%7C%20Pinecone-4C9A2A)
 ![Memory](https://img.shields.io/badge/Memory-Short%20%2B%20Long-F59E0B)
-![Status](https://img.shields.io/badge/Status-Active-22C55E)
+![Status](https://img.shields.io/badge/Status-Archived-6B7280)
+
+> Project status: archived. Active development has stopped, and the repository is kept as a reference.
 
 > Local-first Go agent: safe to run on personal devices and designed to optimize every token in large-context workflows.
 
@@ -161,8 +163,18 @@ Use one mode at a time.
 - `llm_retry_base_delay_ms` (default fallback: `200`)
 - `llm_retry_max_delay_ms` (default fallback: `2000`)
 
+### 6) LLM web search
+
+- Built-in OpenRouter web search is attached to every chat and agent LLM request.
+- `llm_web_search_context_size` controls optional search depth: `low`, `medium`, or `high`
+
+Optional request hints:
+
+- message prefix `/web ...` to emphasize using fresh web data
+- message prefix `/agent ...` for agent mode; web search remains available there too
+
 All fields above can be overridden with env vars (`UPPER_SNAKE_CASE`), for example:
-`API_KEY_OPENROUTER`, `LOCAL_POSTGRES_DSN`, `MEMORY_STATE_FILE`, `LLM_RETRY_MAX_ATTEMPTS`.
+`API_KEY_OPENROUTER`, `LOCAL_POSTGRES_DSN`, `MEMORY_STATE_FILE`, `LLM_RETRY_MAX_ATTEMPTS`, `LLM_WEB_SEARCH_CONTEXT_SIZE`.
 
 ---
 
@@ -228,6 +240,14 @@ Custom levels include `QUESTION`, `ANSWER`, `TASK`, `AGENT`, `MEMORY`.
 ```json
 {
   "message": "hello"
+}
+```
+
+Web search example:
+
+```json
+{
+  "message": "latest PostgreSQL 17 release notes"
 }
 ```
 

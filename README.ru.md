@@ -4,13 +4,44 @@
 ![API](https://img.shields.io/badge/API-HTTP%20JSON-2D7FF9)
 ![Storage](https://img.shields.io/badge/Storage-Local%20%7C%20Pinecone-4C9A2A)
 ![Memory](https://img.shields.io/badge/Memory-Short%20%2B%20Long-F59E0B)
-![Status](https://img.shields.io/badge/Status-Active-22C55E)
+![Status](https://img.shields.io/badge/Status-Archived-6B7280)
+
+> Статус проекта: архивный. Активная разработка остановлена, репозиторий оставлен как справочный.
 
 > Local-first агент на Go: безопасный для запуска на личных устройствах и экономный к токенам при работе с большими контекстами.
 
 [English version](README.md)
 
 ---
+
+## Идеи для улучшения
+
+### Улучшения для стабильности
+
+- Добавить аутентификацию/авторизацию API и rate limiting по токенам.
+- Добавить `GET /healthz` и `GET /readyz` с проверкой базы и модели.
+- Добавить integration-тесты полного `/chat` + memory + tool flow.
+- Добавить endpoint метрик (Prometheus): глубина очереди, latency, error rate.
+
+### Улучшения функционала
+
+- Добавить настраиваемую стратегию хранения и архивирования long-term summary.
+- Добавить ролевой доступ к debug endpoint’ам (`/memory`, `/msg`).
+- Добавить поддержку нескольких memory-профилей на пользователя/сессию.
+- Доработать основного агента
+
+### Фичи
+
+- Добавить SSE/streaming ответы для длинных ответов модели.
+- Добавить систему динамичсекую систему подбора промпта под запрос
+- Добавить конструктор агентов
+
+## Интерфейс
+
+- Добавить tui
+- Добавить gui
+- Добавить cli
+- Доработать api
 
 ## Зачем этот проект
 
@@ -161,8 +192,18 @@ internal/logg                        # структурный логгер
 - `llm_retry_base_delay_ms` (fallback по умолчанию: `200`)
 - `llm_retry_max_delay_ms` (fallback по умолчанию: `2000`)
 
+### 6) Веб-поиск для LLM
+
+- Встроенный OpenRouter web search теперь подключается ко всем LLM-запросам и в обычном чате, и в agent-режиме.
+- `llm_web_search_context_size` задаёт необязательную глубину поиска: `low`, `medium` или `high`
+
+Опциональные подсказки для запроса:
+
+- префикс `/web ...` усиливает акцент на свежих веб-данных
+- префикс `/agent ...` включает agent-режим; веб-поиск там тоже остаётся доступен
+
 Все поля можно переопределить env-переменными (`UPPER_SNAKE_CASE`), например:
-`API_KEY_OPENROUTER`, `LOCAL_POSTGRES_DSN`, `MEMORY_STATE_FILE`, `LLM_RETRY_MAX_ATTEMPTS`.
+`API_KEY_OPENROUTER`, `LOCAL_POSTGRES_DSN`, `MEMORY_STATE_FILE`, `LLM_RETRY_MAX_ATTEMPTS`, `LLM_WEB_SEARCH_CONTEXT_SIZE`.
 
 ---
 
@@ -231,6 +272,14 @@ go run ./cmd --log pretty
 }
 ```
 
+Пример с веб-поиском:
+
+```json
+{
+  "message": "последние заметки к релизу PostgreSQL 17"
+}
+```
+
 Коды ответа:
 
 - `200` успех
@@ -239,30 +288,3 @@ go run ./cmd --log pretty
 - `500` внутренняя ошибка
 
 ---
-
-## Идеи для улучшения
-
-### Улучшения для стабильности
-
-- Добавить аутентификацию/авторизацию API и rate limiting по токенам.
-- Добавить `GET /healthz` и `GET /readyz` с проверкой базы и модели.
-- Добавить integration-тесты полного `/chat` + memory + tool flow.
-- Добавить endpoint метрик (Prometheus): глубина очереди, latency, error rate.
-
-### Улучшения функционала
-
-- Добавить настраиваемую стратегию хранения и архивирования long-term summary.
-- Добавить ролевой доступ к debug endpoint’ам (`/memory`, `/msg`).
-- Добавить поддержку нескольких memory-профилей на пользователя/сессию.
-- Доработать основного агента 
-### Фичи
-
-- Добавить SSE/streaming ответы для длинных ответов модели.
-- Добавить систему динамичсекую систему подбора промпта под запрос
-- Добавить конструктор агентов
-
-## Интерфейс 
-- Добавить tui
-- Добавить gui
-- Добавить cli
-- Доработать api

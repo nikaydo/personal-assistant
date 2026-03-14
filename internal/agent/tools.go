@@ -129,6 +129,7 @@ func (a *Agent) makeBody(messages []models.Message, tools []models.Tool, ToolsCh
 	if len(tools) > 0 {
 		body.Tools = tools
 	}
+	llmcalls.ApplyWebSearch(&body, a.Cfg)
 	return body
 }
 

@@ -14,20 +14,24 @@ import (
 func (ai *Ai) MakeAsk(q string) (mod.ResponseBody, error) {
 	ai.Logger.Question(q)
 	systemPrompt := ai.Config.PromtSystemChat
-	opts := memory.DefaultBuildOptions()
+	buildOpts := memory.DefaultBuildOptions()
 	activeTools := []mod.Tool{}
 	param, ok := chatcommand.CheckCmd(q)
+	if param.Message != "" {
+		q = param.Message
+	}
 	systemPrompt = composeSystemPrompt(systemPrompt, param)
-	if ok {
+	if ok && len(param.Tool) > 0 {
 		activeTools = param.Tool
 	} else {
-		opts.IncludeToolsMemory = false
+		buildOpts.IncludeToolsMemory = false
 	}
-	history := ai.Memory.MessageWithHistoryWithOptions(q, systemPrompt, opts)
+	history := ai.Memory.MessageWithHistoryWithOptions(q, systemPrompt, buildOpts)
 	ai.Logger.Info(
 		"MakeAsk: sending LLM request",
 		"history_messages", len(history),
 		"tools_count", len(activeTools),
+		"web_search", true,
 	)
 	respLLM, err := ai.Queue.AddToQueue(llmcalls.QueueItem{Body: ai.makeBody(history, activeTools)})
 	if err != nil {

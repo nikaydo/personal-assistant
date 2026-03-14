@@ -1,6 +1,6 @@
 {
   "version": "v1",
-  "updated_at": "2026-03-13T08:27:04.514417665Z",
+  "updated_at": "2026-03-14T15:34:49.169623685Z",
   "system_memory": {
     "tone": "rude"
   },
@@ -213,12 +213,98 @@
       "model": "openai/gpt-4o-mini",
       "id": "gen-1773390386-6jtdOIfYkgK7bnhHhalU",
       "created": 1773390386
+    },
+    {
+      "question": {
+        "Text": "Посмотри какие сейчас есть матчи по доте"
+      },
+      "answer": {
+        "Text": "Сейчас в Dota 2 проходят несколько матчей. Вот некоторые из них:\n\n1. **PGL Wallachia Season 7**:\n   - PARIVISION против Team Yandex\n   - BetBoom Team против Yellow Submarine\n   - Xtreme Gaming против Aurora Gaming\n   - Vici Gaming против Team Falcons\n   - Team Heroic против NaVi\n   - Tundra Esports против OG\n\nДля более актуальной информации можно посетить такие сайты, как [cyber.sports.ru](https://cyber.sports.ru/dota2/match/) или [cyberscore.live](https://cyberscore.live/). Если нужны дополнительные данные, дай знать!",
+        "Usage": {
+          "prompt_tokens": 4083,
+          "completion_tokens": 142,
+          "total_tokens": 4225,
+          "cost": 0.02069765,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.00061245
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773501951-eg77EuKNdZ2SOERTDyRa",
+      "created": 1773501951
+    },
+    {
+      "question": {
+        "Text": "Посмотри на ликвипедии"
+      },
+      "answer": {
+        "Text": "На данный момент в Dota 2 проходят матчи в рамках PGL Wallachia Season 7. Вот некоторые из текущих матчей:\n\n- **Tundra Esports vs. NaVi** — 19:00 EET\n- **Falcons vs. Nem** — 15:00 EET\n- **PGL Wallachia Season 7, Round 1** — множество матчей, включая Team Liquid против BB.\n\nЕсли надо больше информации о командах, прошедших матчах или расписании, можешь проверить [Liquipedia](https://liquipedia.net/dota2/Main_Page) для актуальных данных.",
+        "Usage": {
+          "prompt_tokens": 6173,
+          "completion_tokens": 134,
+          "total_tokens": 6307,
+          "cost": 0.02100635,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.00092595
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773501996-3DXESJY01yrRglechCXI",
+      "created": 1773501996
+    },
+    {
+      "question": {
+        "Text": "Прямо щяс идет матч какой?"
+      },
+      "answer": {
+        "Text": "Сейчас идет несколько матчей в разных лигах. Вот актуальная информация по состоянию на 14 марта 2026 года:\n\n1. **J2/J3 Лига**:\n   - FC Imabari vs. Kochi United SC (0 - 2) — законченный.\n   - SC Sagamihara vs. Vegalta Sendai (1 - 3) — законченный.\n   - Montedio Yamagata vs. Shonan Bellmare (1 - 2) — законченный.\n\n2. **Nadeshiko Лига, Див. 1, Женщины**:\n   - Ehime FC Ladies vs. Nittaidai FC (2 - 2) — законченный.\n   - AS Harima Albion vs. Vonds Ichihara FC (2 - 0) — законченный.\n   - Okayama Yunogo Belle vs. NHK Spring Yokohama FC Seagulls (2 - 0) — законченный.\n\nДля полной информации о текущих матчах можешь проверить соответствующие спортивные сайты или Ликвипедию. Если нужно больше деталей по конкретной лиге, дай знать!",
+        "Usage": {
+          "prompt_tokens": 5217,
+          "completion_tokens": 240,
+          "total_tokens": 5457,
+          "cost": 0.02092655,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.00078255
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773502065-q8jpSm0v58KENtsTMVvQ",
+      "created": 1773502065
+    },
+    {
+      "question": {
+        "Text": "Матчи по дота 2 валахия 7 сезон какие матчи идут сейчас и какие будут"
+      },
+      "answer": {
+        "Text": "Сейчас проводятся матчи в рамках турнира **PGL Wallachia Season 7 по Dota 2**. На данный момент запланированы следующие игры:\n\n### Текущие матчи (по времени):\n- **14 марта, 2026**:\n  - В 14:00 МСК: TBD против Heroic (формат best-of-3)\n  - В 17:00 МСК: TBD против TBD (формат best-of-3)\n  - В 20:00 МСК: TBD против TBD (формат best-of-3)\n\n### Ближайшие матчи:\n- **15 марта, 2026**:\n  - В 12:00 МСК: TBD против TBD (формат best-of-3)\n  - В 16:00 МСК: TBD против TBD (формат best-of-5)\n\nТочное состояние матчей может изменяться. Для подробной информации, расписания и результатов турнира ты можешь обратиться к [cybersport.ru](https://cybersport.ru/tournaments/dota-2/pgl-wallachia-season-7) или [liquipedia.net](https://liquipedia.net/dota2/PGL_Wallachia_Season_7). Если тебе нужна еще какая-то информация, просто дай знать!",
+        "Usage": {
+          "prompt_tokens": 7239,
+          "completion_tokens": 271,
+          "total_tokens": 7510,
+          "cost": 0.02124845,
+          "prompt_tokens_details": {},
+          "cost_details": {
+            "upstream_inference_prompt_cost": 0.00108585
+          },
+          "completion_tokens_details": {}
+        }
+      },
+      "model": "openai/gpt-4o-mini",
+      "id": "gen-1773502189-ZnYe02bP3rxrjWMfvckG",
+      "created": 1773502189
     }
   ],
-  "message_count": 9,
+  "message_count": 13,
   "context_coeff": [
-    5,
-    1.3995216,
     4.6734695,
     2.0375495,
     2.3720508,
@@ -226,6 +312,10 @@
     3.2430453,
     3.897243,
     5.9355373,
-    8.419283
+    8.419283,
+    1.0646583,
+    1,
+    1,
+    1
   ]
 }

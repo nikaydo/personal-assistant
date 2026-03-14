@@ -20,6 +20,8 @@ type Error = openroutermodels.Error
 type RequestBody = openroutermodels.RequestBody
 type Provider = openroutermodels.Provider
 type PreferedMinThroughput = openroutermodels.PreferedMinThroughput
+type Plugin = openroutermodels.Plugin
+type WebSearchOptions = openroutermodels.WebSearchOptions
 type ResponseBody = openroutermodels.ResponseBody
 type Model = openroutermodels.Model
 type ModelPricing = openroutermodels.ModelPricing
@@ -45,7 +47,6 @@ type ShotTermQuestion = memorymodels.ShotTermQuestion
 type History = memorymodels.History
 type SystemSettings = memorymodels.SystemSettings
 type ToolsHistory = memorymodels.ToolsHistory
-
 
 func ExtractJSON(s string) (string, error) {
 	return openroutermodels.ExtractJSON(s)

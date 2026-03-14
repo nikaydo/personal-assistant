@@ -1,6 +1,7 @@
 package llmcalls
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nikaydo/personal-assistant/internal/config"
+	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
 type countingRoundTripper struct {
@@ -156,5 +158,90 @@ func TestDoReqWithRetry_DoesNotRetryNonRetryableStatus(t *testing.T) {
 	}
 	if rt.Calls() != 1 {
 		t.Fatalf("non-retryable status should not be retried: got=%d want=1", rt.Calls())
+	}
+}
+
+type fallbackWebSearchOptionsRoundTripper struct {
+	mu     sync.Mutex
+	calls  int
+	bodies []string
+}
+
+func (rt *fallbackWebSearchOptionsRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	payload, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	rt.mu.Lock()
+	rt.calls++
+	rt.bodies = append(rt.bodies, string(payload))
+	rt.mu.Unlock()
+
+	if strings.Contains(string(payload), `"web_search_options"`) {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\"error\":{\"message\":\"Web search options not supported with this model.\",\"type\":\"invalid_request_error\",\"param\":\"web_search_options\"}}","provider_name":"Azure","is_byok":false}}}`)),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	}
+
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"ok"}}]}`)),
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
+func (rt *fallbackWebSearchOptionsRoundTripper) snapshot() (int, []string) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	out := make([]string, len(rt.bodies))
+	copy(out, rt.bodies)
+	return rt.calls, out
+}
+
+func TestAsk_RetriesWithoutWebSearchOptionsWhenProviderRejectsThem(t *testing.T) {
+	oldClient := httpClient
+	rt := &fallbackWebSearchOptionsRoundTripper{}
+	httpClient = &http.Client{Timeout: time.Second, Transport: rt}
+	t.Cleanup(func() { httpClient = oldClient })
+
+	body := models.RequestBody{
+		Model:   "openai/gpt-4o-mini",
+		Plugins: []models.Plugin{{ID: "web"}},
+		WebSearchOptions: &models.WebSearchOptions{
+			SearchContextSize: "medium",
+		},
+	}
+
+	resp, err := Ask(body, config.Config{})
+	if err != nil {
+		t.Fatalf("Ask failed: %v", err)
+	}
+	if len(resp.Choices) != 1 || resp.Choices[0].Message.Content != "ok" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+
+	calls, bodies := rt.snapshot()
+	if calls != 2 {
+		t.Fatalf("expected 2 requests, got %d", calls)
+	}
+	if !strings.Contains(bodies[0], `"web_search_options"`) {
+		t.Fatalf("expected first request to include web_search_options, got %s", bodies[0])
+	}
+	if strings.Contains(bodies[1], `"web_search_options"`) {
+		t.Fatalf("expected fallback request to omit web_search_options, got %s", bodies[1])
+	}
+
+	var second map[string]any
+	if err := json.Unmarshal([]byte(bodies[1]), &second); err != nil {
+		t.Fatalf("failed to parse fallback request: %v", err)
+	}
+	plugins, ok := second["plugins"].([]any)
+	if !ok || len(plugins) != 1 {
+		t.Fatalf("expected plugins to remain in fallback request, got %+v", second["plugins"])
 	}
 }

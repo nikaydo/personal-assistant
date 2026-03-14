@@ -58,6 +58,9 @@ type Config struct {
 	LLMRetryMaxAttempts int `json:"llm_retry_max_attempts"`
 	LLMRetryBaseDelayMs int `json:"llm_retry_base_delay_ms"`
 	LLMRetryMaxDelayMs  int `json:"llm_retry_max_delay_ms"`
+
+	// LLM web search
+	LLMWebSearchContextSize string `json:"llm_web_search_context_size"`
 }
 
 func ConfigRead(path string) (*Config, error) {
@@ -142,6 +145,7 @@ func applyEnvOverrides(config *Config) error {
 	if config.LLMRetryMaxDelayMs, err = getEnvInt("LLM_RETRY_MAX_DELAY_MS", config.LLMRetryMaxDelayMs); err != nil {
 		return err
 	}
+	config.LLMWebSearchContextSize = getEnvString("LLM_WEB_SEARCH_CONTEXT_SIZE", config.LLMWebSearchContextSize)
 
 	return nil
 }
