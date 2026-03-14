@@ -18,9 +18,11 @@ import (
 )
 
 const (
-	defaultLongTermTopK = 6
-	maxLongTermTopK     = 8
+	defaultLongTermTopK        = 6
+	maxLongTermTopK            = 8
 	minLongTermRetrievalBudget = 64
+	minDynamicPromptBudget     = 24
+	maxDynamicPromptBudget     = 96
 )
 
 var createEmbeddingFn = llmcalls.CreateEmbending
@@ -35,6 +37,7 @@ var searchByVectorFn = func(db *database.Database, vector []float32, topK int) (
 	}
 	return out, nil
 }
+var rewriteDynamicPromptFn = defaultDynamicPromptRewrite
 
 type Memory struct {
 	//системная память
@@ -69,15 +72,17 @@ type BuildOptions struct {
 }
 
 type PromptEstimate struct {
-	SystemPromptTokens int
-	LongTermTokens     int
-	ShortTermTokens    int
-	QuestionTokens     int
-	ToolsMemoryTokens  int
-	TotalTokens        int
-	LongTermInvoked    bool
-	ToolsInvoked       bool
-	LongTermReason     string
+	SystemPromptTokens  int
+	DynamicPromptTokens int
+	LongTermTokens      int
+	ShortTermTokens     int
+	QuestionTokens      int
+	ToolsMemoryTokens   int
+	TotalTokens         int
+	LongTermInvoked     bool
+	ToolsInvoked        bool
+	LongTermReason      string
+	DynamicPromptSource string
 }
 
 type ContextBudgetPlan struct {
@@ -87,6 +92,15 @@ type ContextBudgetPlan struct {
 	ToolsTokensBudget   int
 	ShortTokensEstimate int
 	LongTermTokenBudget int
+}
+
+type DynamicPromptSignals struct {
+	Question           string
+	IncludeToolsMemory bool
+	LongTermInvoked    bool
+	LongTermReason     string
+	SystemSettings     *models.SystemSettings
+	HasShortTerm       bool
 }
 
 func DefaultBuildOptions() BuildOptions {
@@ -114,12 +128,13 @@ func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmc
 		m.Logger.Memory(
 			"TokenTelemetry: estimate_vs_actual",
 			"estimated_prompt_tokens_by_block", map[string]int{
-				"system_prompt": estimate.SystemPromptTokens,
-				"long_term":     estimate.LongTermTokens,
-				"short_term":    estimate.ShortTermTokens,
-				"question":      estimate.QuestionTokens,
-				"tools_memory":  estimate.ToolsMemoryTokens,
-				"total":         estimate.TotalTokens,
+				"system_prompt":  estimate.SystemPromptTokens,
+				"dynamic_prompt": estimate.DynamicPromptTokens,
+				"long_term":      estimate.LongTermTokens,
+				"short_term":     estimate.ShortTermTokens,
+				"question":       estimate.QuestionTokens,
+				"tools_memory":   estimate.ToolsMemoryTokens,
+				"total":          estimate.TotalTokens,
 			},
 			"actual_prompt_tokens", answer.Usage.PromptTokens,
 			"actual_completion_tokens", answer.Usage.CompletionTokens,
@@ -127,6 +142,7 @@ func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmc
 			"waste_ratio", fmt.Sprintf("%.2f", wasteRatio),
 			"long_term_invoked", estimate.LongTermInvoked,
 			"long_term_reason", estimate.LongTermReason,
+			"dynamic_prompt_source", estimate.DynamicPromptSource,
 			"tools_memory_invoked", estimate.ToolsInvoked,
 		)
 	}
@@ -165,13 +181,38 @@ func (m *Memory) MessageWithHistory(q, systemPrompt string) []models.Message {
 func (m *Memory) MessageWithHistoryWithOptions(q, systemPrompt string, opts BuildOptions) []models.Message {
 	budget, shortTermCount := m.PlanContextBudget(q)
 	longTermContent, longTermMsgTokens, longTermSymbols, longTermUsed, longTermReason := m.prepareLongTermMemoryMessage(q, shortTermCount, budget.LongTermTokenBudget, opts)
+	dynamicAddon := ""
+	dynamicSource := "disabled"
+	if strings.TrimSpace(systemPrompt) != "" {
+		dynamicPromptBudget := m.dynamicPromptBudgetTokens()
+		dynamicSignals := DynamicPromptSignals{
+			Question:           q,
+			IncludeToolsMemory: opts.IncludeToolsMemory,
+			LongTermInvoked:    longTermUsed,
+			LongTermReason:     longTermReason,
+			SystemSettings:     m.SystemMemory,
+			HasShortTerm:       shortTermCount > 0,
+		}
+		dynamicAddon, dynamicSource = m.buildDynamicPrompt(dynamicSignals, dynamicPromptBudget)
+	}
+	effectiveSystemPrompt := systemPrompt
+	if dynamicAddon != "" {
+		if strings.TrimSpace(effectiveSystemPrompt) == "" {
+			effectiveSystemPrompt = dynamicAddon
+		} else {
+			effectiveSystemPrompt += "\n" + dynamicAddon
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	messages := []models.Message{}
 	m.Tokens.CountSymbolsInContext = 0
-	var systemPromptTokens, longTermTokens, shortTermTokens, toolsmemoryTokens *int = new(int), new(int), new(int), new(int)
+	var systemPromptTokens, dynamicPromptTokens, longTermTokens, shortTermTokens, toolsmemoryTokens *int = new(int), new(int), new(int), new(int), new(int)
+	if dynamicAddon != "" {
+		*dynamicPromptTokens = int(float32(len(dynamicAddon)) / m.Tokens.GetContextCoeff())
+	}
 	//добавляем в историю системный промт и персоанализацию
-	messages = m.SystemPromptFill(systemPrompt, messages, systemPromptTokens)
+	messages = m.SystemPromptFill(effectiveSystemPrompt, messages, systemPromptTokens)
 	//добавляем в историю сообщения из информации о пользователе
 	messages = m.UserProfileFill(messages)
 	//добавляем в историю сообщения из истории выполнения функций
@@ -200,19 +241,22 @@ func (m *Memory) MessageWithHistoryWithOptions(q, systemPrompt string, opts Buil
 		questionTokens = int(float32(len(q)) / m.Tokens.GetContextCoeff())
 	}
 	estimate := PromptEstimate{
-		SystemPromptTokens: *systemPromptTokens,
-		LongTermTokens:     *longTermTokens,
-		ShortTermTokens:    *shortTermTokens,
-		QuestionTokens:     questionTokens,
-		ToolsMemoryTokens:  *toolsmemoryTokens,
-		TotalTokens:        *systemPromptTokens + *longTermTokens + *shortTermTokens + questionTokens + *toolsmemoryTokens,
-		LongTermInvoked:    longTermUsed,
-		ToolsInvoked:       opts.IncludeToolsMemory && *toolsmemoryTokens > 0,
-		LongTermReason:     longTermReason,
+		SystemPromptTokens:  *systemPromptTokens,
+		DynamicPromptTokens: *dynamicPromptTokens,
+		LongTermTokens:      *longTermTokens,
+		ShortTermTokens:     *shortTermTokens,
+		QuestionTokens:      questionTokens,
+		ToolsMemoryTokens:   *toolsmemoryTokens,
+		TotalTokens:         *systemPromptTokens + *dynamicPromptTokens + *longTermTokens + *shortTermTokens + questionTokens + *toolsmemoryTokens,
+		LongTermInvoked:     longTermUsed,
+		ToolsInvoked:        opts.IncludeToolsMemory && *toolsmemoryTokens > 0,
+		LongTermReason:      longTermReason,
+		DynamicPromptSource: dynamicSource,
 	}
 	m.lastEstimate = estimate
 	m.Logger.Memory("MessageWithHistory: prepared messages with history for LLM request",
 		"system_prompt_tokens", *systemPromptTokens,
+		"dynamic_prompt_tokens", *dynamicPromptTokens,
 		"long_term_tokens", *longTermTokens,
 		"short_term_tokens", *shortTermTokens,
 		"question_tokens", questionTokens,
@@ -222,6 +266,7 @@ func (m *Memory) MessageWithHistoryWithOptions(q, systemPrompt string, opts Buil
 		"context_coeff", m.Tokens.ContextCoeffSnapshot(),
 		"long_term_invoked", longTermUsed,
 		"long_term_reason", longTermReason,
+		"dynamic_prompt_source", dynamicSource,
 	)
 	m.Logger.Info("Memory with history", "messages_count", len(messages))
 	return messages
@@ -340,6 +385,165 @@ func (m *Memory) dynamicLongTermTopK(question string, shortTermCount int) int {
 		topK = 2
 	}
 	return topK
+}
+
+func (m *Memory) dynamicPromptBudgetTokens() int {
+	percent := m.Cfg.DynamicPromptBudgetPercent
+	if percent <= 0 {
+		percent = 20
+	}
+	base := m.Tokens.SystemPromptPercent
+	derived := int(float32(base) * float32(percent) / 100)
+	return min(max(derived, minDynamicPromptBudget), maxDynamicPromptBudget)
+}
+
+func (m *Memory) buildDynamicPrompt(signals DynamicPromptSignals, budgetTokens int) (string, string) {
+	if !m.Cfg.DynamicPromptEnabled {
+		return "", "disabled"
+	}
+	if budgetTokens <= 0 {
+		return "", "disabled"
+	}
+	coeff := m.Tokens.GetContextCoeff()
+	if coeff <= 0 {
+		coeff = 5
+	}
+	appendIfFits := func(current []string, sentence string) []string {
+		if strings.TrimSpace(sentence) == "" {
+			return current
+		}
+		candidate := append(append([]string{}, current...), sentence)
+		text := strings.Join(candidate, " ")
+		if int(float32(len(text))/coeff) > budgetTokens {
+			return current
+		}
+		return candidate
+	}
+
+	sentences := make([]string, 0, 3)
+	sentences = appendIfFits(sentences, dynamicPersonaSentence(signals.SystemSettings))
+	if strings.TrimSpace(signals.Question) != "" {
+		sentences = appendIfFits(sentences, "Prioritize factual accuracy, avoid fabrication, and state uncertainty clearly when information is incomplete.")
+		if signals.LongTermInvoked {
+			sentences = appendIfFits(sentences, "Use relevant long-term conversation memory when it improves precision, while keeping the answer anchored to the latest user request.")
+		} else if signals.HasShortTerm {
+			sentences = appendIfFits(sentences, "Use short-term dialogue context to maintain continuity and resolve references in the current request.")
+		}
+		if signals.IncludeToolsMemory {
+			sentences = appendIfFits(sentences, "When tools are available, use them only when necessary and keep tool-driven steps concise and goal-focused.")
+		} else {
+			sentences = appendIfFits(sentences, "Tools are unavailable in this turn, so respond directly from available context without proposing tool calls.")
+		}
+	}
+
+	if len(sentences) > 0 {
+		return strings.Join(sentences, " "), "rule_based"
+	}
+	if !m.Cfg.DynamicPromptFallbackEnabled || strings.TrimSpace(signals.Question) == "" {
+		return "", "disabled"
+	}
+	rewritten, err := rewriteDynamicPromptFn(m, signals, budgetTokens)
+	if err != nil {
+		if m.Logger != nil {
+			m.Logger.Warn("dynamic_prompt_fallback_error", "error", err)
+		}
+		return "", "disabled"
+	}
+	rewritten = strings.TrimSpace(rewritten)
+	if rewritten == "" {
+		return "", "disabled"
+	}
+	if int(float32(len(rewritten))/coeff) > budgetTokens {
+		rewritten = trimTextToTokenBudget(rewritten, budgetTokens, coeff)
+		rewritten = strings.TrimSpace(rewritten)
+	}
+	if rewritten == "" {
+		return "", "disabled"
+	}
+	return rewritten, "fallback_rewriter"
+}
+
+func dynamicPersonaSentence(settings *models.SystemSettings) string {
+	if settings == nil {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	if v := strings.TrimSpace(settings.Language); v != "" {
+		parts = append(parts, "Language: "+v)
+	}
+	if v := strings.TrimSpace(settings.Tone); v != "" {
+		parts = append(parts, "Tone: "+v)
+	}
+	if v := strings.TrimSpace(settings.Verbosity); v != "" {
+		parts = append(parts, "Verbosity: "+v)
+	}
+	if v := strings.TrimSpace(settings.PersonalityProfile); v != "" {
+		parts = append(parts, "Persona: "+v)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Adapt response style to user preferences (" + strings.Join(parts, ", ") + ")."
+}
+
+func defaultDynamicPromptRewrite(m *Memory, signals DynamicPromptSignals, budgetTokens int) (string, error) {
+	if m == nil || m.Agent.Queue == nil {
+		return "", fmt.Errorf("dynamic prompt fallback queue is not configured")
+	}
+	model := strings.TrimSpace(m.Agent.Model)
+	if model == "" && len(m.Cfg.ModelOpenRouter) > 0 {
+		model = m.Cfg.ModelOpenRouter[0]
+	}
+	if model == "" {
+		return "", fmt.Errorf("dynamic prompt fallback model is not configured")
+	}
+	rewriterSystem := "You write compact system instructions for another assistant. Return plain text only, 1-2 sentences, no markdown."
+	rewriterUser := fmt.Sprintf("User question: %s\nTools enabled: %t\nLong-term used: %t (%s)\nHas short-term context: %t\nWrite concise high-precision guidance.",
+		strings.TrimSpace(signals.Question), signals.IncludeToolsMemory, signals.LongTermInvoked, signals.LongTermReason, signals.HasShortTerm)
+	body := models.RequestBody{
+		Model: model,
+		Messages: []models.Message{
+			{Role: "system", Content: rewriterSystem},
+			{Role: "user", Content: rewriterUser},
+		},
+	}
+	resp, err := m.Agent.Queue.AddToQueue(llmcalls.QueueItem{Body: body})
+	if err != nil {
+		return "", err
+	}
+	if resp.Error.Message != "" {
+		return "", fmt.Errorf("%s", resp.Error.Message)
+	}
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("dynamic prompt fallback returned empty choices")
+	}
+	content := strings.TrimSpace(resp.Choices[0].Message.Content)
+	if content == "" {
+		return "", fmt.Errorf("dynamic prompt fallback returned empty content")
+	}
+	coeff := m.Tokens.GetContextCoeff()
+	if coeff <= 0 {
+		coeff = 5
+	}
+	if int(float32(len(content))/coeff) > budgetTokens {
+		content = trimTextToTokenBudget(content, budgetTokens, coeff)
+	}
+	return content, nil
+}
+
+func trimTextToTokenBudget(text string, budgetTokens int, coeff float32) string {
+	if strings.TrimSpace(text) == "" || budgetTokens <= 0 {
+		return ""
+	}
+	maxSymbols := int(float32(budgetTokens) * coeff)
+	if maxSymbols <= 0 {
+		return ""
+	}
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) <= maxSymbols {
+		return string(runes)
+	}
+	return string(runes[:maxSymbols])
 }
 
 func (m *Memory) SystemPromptFill(systemPrompt string, msg []models.Message, systemPromptTokens *int) []models.Message {

@@ -47,9 +47,12 @@ type Config struct {
 	//Promts
 	PromtSystemChat string `json:"promt_system_chat"`
 	// system prompt used specifically when the agent enters reasoning mode.
-	PromtSystemAgent       string `json:"promt_system_agent"`
-	PromtMemorySummary     string `json:"promt_memory_summary"`
-	MemorySummaryUserPromt string `json:"memory_summary_user_promt"`
+	PromtSystemAgent             string `json:"promt_system_agent"`
+	PromtMemorySummary           string `json:"promt_memory_summary"`
+	MemorySummaryUserPromt       string `json:"memory_summary_user_promt"`
+	DynamicPromptEnabled         bool   `json:"dynamic_prompt_enabled"`
+	DynamicPromptFallbackEnabled bool   `json:"dynamic_prompt_fallback_enabled"`
+	DynamicPromptBudgetPercent   int    `json:"dynamic_prompt_budget_percent"`
 
 	// LLM request stability tuning
 	LLMRetryMaxAttempts int `json:"llm_retry_max_attempts"`
@@ -58,7 +61,11 @@ type Config struct {
 }
 
 func ConfigRead(path string) (*Config, error) {
-	var config Config
+	config := Config{
+		DynamicPromptEnabled:         true,
+		DynamicPromptFallbackEnabled: true,
+		DynamicPromptBudgetPercent:   20,
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -113,6 +120,18 @@ func applyEnvOverrides(config *Config) error {
 	config.PromtSystemAgent = getEnvString("PROMT_SYSTEM_AGENT", config.PromtSystemAgent)
 	config.PromtMemorySummary = getEnvString("PROMT_MEMORY_SUMMARY", config.PromtMemorySummary)
 	config.MemorySummaryUserPromt = getEnvString("MEMORY_SUMMARY_USER_PROMT", config.MemorySummaryUserPromt)
+	if config.DynamicPromptEnabled, err = getEnvBool("DYNAMIC_PROMPT_ENABLED", config.DynamicPromptEnabled); err != nil {
+		return err
+	}
+	if config.DynamicPromptFallbackEnabled, err = getEnvBool("DYNAMIC_PROMPT_FALLBACK_ENABLED", config.DynamicPromptFallbackEnabled); err != nil {
+		return err
+	}
+	if config.DynamicPromptBudgetPercent, err = getEnvInt("DYNAMIC_PROMPT_BUDGET_PERCENT", config.DynamicPromptBudgetPercent); err != nil {
+		return err
+	}
+	if config.DynamicPromptBudgetPercent <= 0 {
+		config.DynamicPromptBudgetPercent = 20
+	}
 
 	if config.LLMRetryMaxAttempts, err = getEnvInt("LLM_RETRY_MAX_ATTEMPTS", config.LLMRetryMaxAttempts); err != nil {
 		return err
@@ -144,6 +163,20 @@ func getEnvInt(name string, fallback int) (int, error) {
 	parsed, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil {
 		return 0, fmt.Errorf("invalid integer env %s=%q: %w", name, value, err)
+	}
+
+	return parsed, nil
+}
+
+func getEnvBool(name string, fallback bool) (bool, error) {
+	value, ok := os.LookupEnv(name)
+	if !ok {
+		return fallback, nil
+	}
+
+	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return false, fmt.Errorf("invalid bool env %s=%q: %w", name, value, err)
 	}
 
 	return parsed, nil

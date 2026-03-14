@@ -17,13 +17,12 @@ func (ai *Ai) MakeAsk(q string) (mod.ResponseBody, error) {
 	opts := memory.DefaultBuildOptions()
 	activeTools := []mod.Tool{}
 	param, ok := chatcommand.CheckCmd(q)
+	systemPrompt = composeSystemPrompt(systemPrompt, param)
 	if ok {
-		systemPrompt += param.SystemPrompt
 		activeTools = param.Tool
 	} else {
 		opts.IncludeToolsMemory = false
 	}
-	systemPrompt += param.SystemPrompt
 	history := ai.Memory.MessageWithHistoryWithOptions(q, systemPrompt, opts)
 	ai.Logger.Info(
 		"MakeAsk: sending LLM request",
@@ -81,4 +80,8 @@ func (ai *Ai) MakeAsk(q string) (mod.ResponseBody, error) {
 	}
 	ai.Logger.Answer(respLLM)
 	return respLLM, nil
+}
+
+func composeSystemPrompt(base string, param chatcommand.Param) string {
+	return base + param.SystemPrompt
 }

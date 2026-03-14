@@ -29,7 +29,11 @@ func newTestLogger() *logg.Logger {
 func newTestMemory() *Memory {
 	return &Memory{
 		Logger: newTestLogger(),
-		Cfg:    config.Config{},
+		Cfg: config.Config{
+			DynamicPromptEnabled:         true,
+			DynamicPromptFallbackEnabled: true,
+			DynamicPromptBudgetPercent:   20,
+		},
 		Tokens: ContextTokens{
 			ContextCoeff: []float32{1},
 		},
@@ -636,5 +640,121 @@ func TestToolsMemoryFill_RespectsBudget(t *testing.T) {
 	}
 	if !strings.Contains(msg[0].Content, strings.Repeat("a", 40)) {
 		t.Fatalf("unexpected tool content: %#v", msg[0])
+	}
+}
+
+func TestBuildDynamicPrompt_RuleBased(t *testing.T) {
+	m := newTestMemory()
+	m.Tokens.ContextCoeff = []float32{1}
+	signals := DynamicPromptSignals{
+		Question:           "Как лучше оптимизировать этот запрос?",
+		IncludeToolsMemory: false,
+		LongTermInvoked:    true,
+		LongTermReason:     "enabled_by_budget_policy",
+		SystemSettings: &models.SystemSettings{
+			Language: "russian",
+			Tone:     "neutral",
+		},
+		HasShortTerm: true,
+	}
+
+	text, source := m.buildDynamicPrompt(signals, 500)
+	if source != "rule_based" {
+		t.Fatalf("unexpected source: got=%s want=rule_based", source)
+	}
+	if !strings.Contains(text, "Language: russian") {
+		t.Fatalf("expected language hint in dynamic prompt: %q", text)
+	}
+	if !strings.Contains(text, "avoid fabrication") {
+		t.Fatalf("expected accuracy instruction in dynamic prompt: %q", text)
+	}
+	if !strings.Contains(text, "Use relevant long-term conversation memory") {
+		t.Fatalf("expected long-term instruction in dynamic prompt: %q", text)
+	}
+}
+
+func TestBuildDynamicPrompt_FallbackRewriterOnWeakRuleSet(t *testing.T) {
+	m := newTestMemory()
+	m.Tokens.ContextCoeff = []float32{1}
+	oldRewrite := rewriteDynamicPromptFn
+	t.Cleanup(func() {
+		rewriteDynamicPromptFn = oldRewrite
+	})
+
+	called := false
+	rewriteDynamicPromptFn = func(_ *Memory, _ DynamicPromptSignals, _ int) (string, error) {
+		called = true
+		return "Use compact factual reasoning and state uncertainty.", nil
+	}
+
+	text, source := m.buildDynamicPrompt(DynamicPromptSignals{
+		Question:           "Q",
+		IncludeToolsMemory: false,
+		LongTermInvoked:    false,
+		HasShortTerm:       false,
+	}, 10)
+
+	if !called {
+		t.Fatalf("expected fallback rewriter to be called")
+	}
+	if source != "fallback_rewriter" {
+		t.Fatalf("unexpected source: got=%s want=fallback_rewriter", source)
+	}
+	if text == "" {
+		t.Fatalf("expected non-empty fallback text")
+	}
+}
+
+func TestBuildDynamicPrompt_FallbackErrorSoftSkips(t *testing.T) {
+	m := newTestMemory()
+	m.Tokens.ContextCoeff = []float32{1}
+	oldRewrite := rewriteDynamicPromptFn
+	t.Cleanup(func() {
+		rewriteDynamicPromptFn = oldRewrite
+	})
+
+	rewriteDynamicPromptFn = func(_ *Memory, _ DynamicPromptSignals, _ int) (string, error) {
+		return "", errors.New("rewrite failed")
+	}
+
+	text, source := m.buildDynamicPrompt(DynamicPromptSignals{Question: "Q"}, 10)
+	if text != "" {
+		t.Fatalf("expected empty text on fallback error, got %q", text)
+	}
+	if source != "disabled" {
+		t.Fatalf("unexpected source: got=%s want=disabled", source)
+	}
+}
+
+func TestMessageWithHistory_DynamicPromptTelemetryAndInjection(t *testing.T) {
+	m := newTestMemory()
+	m.Tokens.ContextCoeff = []float32{5}
+	m.Tokens.SystemPromptPercent = 1000
+	m.Tokens.SystemMemoryLimit = 0
+	m.Tokens.ToolsMemoryLimit = 0
+	m.Tokens.ShortTermLimit = 0
+	m.Tokens.LongTermLimit = 0
+	m.DBase = nil
+	m.SystemMemory = &models.SystemSettings{Tone: "neutral"}
+
+	msg := m.MessageWithHistoryWithOptions("q", "base system", BuildOptions{
+		IncludeLongTerm:    true,
+		IncludeToolsMemory: false,
+	})
+
+	if len(msg) != 2 {
+		t.Fatalf("unexpected messages count: got=%d want=2", len(msg))
+	}
+	if msg[0].Role != "system" || !strings.Contains(msg[0].Content, "base system") {
+		t.Fatalf("unexpected system message: %#v", msg[0])
+	}
+	if !strings.Contains(msg[0].Content, "avoid fabrication") {
+		t.Fatalf("expected dynamic prompt content in system message: %q", msg[0].Content)
+	}
+	if m.lastEstimate.DynamicPromptSource != "rule_based" {
+		t.Fatalf("unexpected dynamic prompt source: got=%s want=rule_based", m.lastEstimate.DynamicPromptSource)
+	}
+	if m.lastEstimate.DynamicPromptTokens <= 0 {
+		t.Fatalf("expected positive dynamic prompt token estimate, got=%d", m.lastEstimate.DynamicPromptTokens)
 	}
 }
