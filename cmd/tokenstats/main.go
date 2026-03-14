@@ -27,7 +27,6 @@ type state struct {
 func main() {
 	path := flag.String("state", "./data/memory_state.json", "path to memory_state.json")
 	flag.Parse()
-
 	raw, err := os.ReadFile(*path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read state file: %v\n", err)

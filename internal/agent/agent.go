@@ -417,7 +417,6 @@ func (a *Agent) Run(body models.ResponseBody) (models.ResponseBody, error) {
 		if err := a.CollectContext(respLLM, out); err != nil {
 			a.Logger.Error("CollectContext failed", "error", err)
 		}
-		// log history snapshot for debugging loops
 		a.Logger.Agent("History after step", "count", len(*a.History))
 	}
 	return models.ResponseBody{}, errors.New("limit of steps")

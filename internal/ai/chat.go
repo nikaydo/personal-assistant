@@ -5,33 +5,28 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/nikaydo/personal-assistant/internal/agent"
+	chatcommand "github.com/nikaydo/personal-assistant/internal/ai/chatCommand"
 	"github.com/nikaydo/personal-assistant/internal/ai/memory"
 	llmcalls "github.com/nikaydo/personal-assistant/internal/llmCalls"
 	mod "github.com/nikaydo/personal-assistant/internal/models"
 )
 
-func (ai *Ai) MakeAsk(q string, tools []mod.Tool) (mod.ResponseBody, error) {
+func (ai *Ai) MakeAsk(q string) (mod.ResponseBody, error) {
 	ai.Logger.Question(q)
-	_ = tools
-	plan := ai.planRequest(q)
 	systemPrompt := ai.Config.PromtSystemChat
 	opts := memory.DefaultBuildOptions()
 	activeTools := []mod.Tool{}
-	if plan.Route == routeAgent {
-		if systemPrompt != "" {
-			systemPrompt += "\n"
-		}
-		systemPrompt += "Tool policy: If the user request requires actions or tool usage (files, commands, external actions), you must call the agent_mode function with the original user request in the question field. Otherwise answer directly without tool calls."
-		activeTools = agent.GetToolDefault()
+	param, ok := chatcommand.CheckCmd(q)
+	if ok {
+		systemPrompt += param.SystemPrompt
+		activeTools = param.Tool
 	} else {
 		opts.IncludeToolsMemory = false
 	}
+	systemPrompt += param.SystemPrompt
 	history := ai.Memory.MessageWithHistoryWithOptions(q, systemPrompt, opts)
 	ai.Logger.Info(
 		"MakeAsk: sending LLM request",
-		"route", plan.Route,
-		"route_reason", plan.Reason,
 		"history_messages", len(history),
 		"tools_count", len(activeTools),
 	)

@@ -96,12 +96,10 @@ func DefaultBuildOptions() BuildOptions {
 }
 
 func (m *Memory) Memory(question string, answer models.ResponseBody, Queue *llmcalls.Queue, model string) {
-	// сохраняем в краткосрочной памяти вопрос и ответ
 	m.FillShortMemory(question, answer)
 	if err := m.SummaryShortMemory(Queue, model); err != nil {
 		m.Logger.Error("SummaryShortMemory: failed to summarize short-term memory:", err)
 	}
-	// рассчитываем коэффициент контекста
 	m.mu.RLock()
 	symbolsInContext := m.Tokens.CountSymbolsInContext
 	m.mu.RUnlock()

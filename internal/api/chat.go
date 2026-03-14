@@ -11,10 +11,6 @@ import (
 	"github.com/nikaydo/personal-assistant/internal/models"
 )
 
-var makeAskFn = func(ai *aimodel.Ai, q string, tools []models.Tool) (models.ResponseBody, error) {
-	return ai.MakeAsk(q, tools)
-}
-
 func (api *API) chat(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MiB
 	var Query models.Query
@@ -33,7 +29,7 @@ func (api *API) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.Ai.Logger.Info("chat request accepted", "message_len", len(Query.Message), "type", Query.Type)
-	msg, err := makeAskFn(api.Ai, Query.Message, nil)
+	msg, err := api.Ai.MakeAsk(Query.Message)
 	if err != nil {
 		api.Ai.Logger.Error("chat processing failed:", err)
 		status := http.StatusInternalServerError
