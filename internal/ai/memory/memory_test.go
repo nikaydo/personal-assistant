@@ -195,21 +195,62 @@ func TestBuildLongTermBlock_RespectsTokenBudget(t *testing.T) {
 	}
 }
 
-func TestShouldRetrieveLongTerm_AdaptiveRules(t *testing.T) {
+func TestShouldRetrieveLongTerm_BudgetPolicy(t *testing.T) {
 	m := newTestMemory()
-	enabled, reason := m.shouldRetrieveLongTerm("как мы решили вопрос раньше?", 3, DefaultBuildOptions())
+	m.DBase = &database.Database{}
+	m.Tokens.LongTermLimit = 256
+
+	enabled, reason := m.shouldRetrieveLongTerm("какой у нас статус по задаче?", 64, DefaultBuildOptions())
 	if !enabled {
-		t.Fatalf("expected retrieval enabled for historical reference, reason=%s", reason)
+		t.Fatalf("expected retrieval enabled when policy gates pass, reason=%s", reason)
+	}
+	if reason != "enabled_by_budget_policy" {
+		t.Fatalf("unexpected reason: got=%s want=%s", reason, "enabled_by_budget_policy")
 	}
 
-	enabled, reason = m.shouldRetrieveLongTerm("ok", 4, DefaultBuildOptions())
+	enabled, reason = m.shouldRetrieveLongTerm("какой у нас статус по задаче?", 63, DefaultBuildOptions())
 	if enabled {
-		t.Fatalf("expected retrieval disabled for short local question, reason=%s", reason)
+		t.Fatalf("expected retrieval disabled when budget is below threshold, reason=%s", reason)
+	}
+	if reason != "budget_below_threshold" {
+		t.Fatalf("unexpected reason: got=%s want=%s", reason, "budget_below_threshold")
 	}
 
-	enabled, reason = m.shouldRetrieveLongTerm("расскажи подробнее про архитектуру сервиса и компромиссы", 0, DefaultBuildOptions())
-	if !enabled {
-		t.Fatalf("expected retrieval enabled when short-term context is empty, reason=%s", reason)
+	enabled, reason = m.shouldRetrieveLongTerm("   ", 64, DefaultBuildOptions())
+	if enabled {
+		t.Fatalf("expected retrieval disabled for empty question, reason=%s", reason)
+	}
+	if reason != "empty_question" {
+		t.Fatalf("unexpected reason: got=%s want=%s", reason, "empty_question")
+	}
+
+	opts := DefaultBuildOptions()
+	opts.IncludeLongTerm = false
+	enabled, reason = m.shouldRetrieveLongTerm("какой у нас статус по задаче?", 64, opts)
+	if enabled {
+		t.Fatalf("expected retrieval disabled by options, reason=%s", reason)
+	}
+	if reason != "long_term_disabled_by_options" {
+		t.Fatalf("unexpected reason: got=%s want=%s", reason, "long_term_disabled_by_options")
+	}
+
+	m.Tokens.LongTermLimit = 0
+	enabled, reason = m.shouldRetrieveLongTerm("какой у нас статус по задаче?", 64, DefaultBuildOptions())
+	if enabled {
+		t.Fatalf("expected retrieval disabled when long-term limit is zero, reason=%s", reason)
+	}
+	if reason != "long_term_limit_disabled" {
+		t.Fatalf("unexpected reason: got=%s want=%s", reason, "long_term_limit_disabled")
+	}
+
+	m.Tokens.LongTermLimit = 256
+	m.DBase = nil
+	enabled, reason = m.shouldRetrieveLongTerm("какой у нас статус по задаче?", 64, DefaultBuildOptions())
+	if enabled {
+		t.Fatalf("expected retrieval disabled when db is nil, reason=%s", reason)
+	}
+	if reason != "db_nil" {
+		t.Fatalf("unexpected reason: got=%s want=%s", reason, "db_nil")
 	}
 }
 

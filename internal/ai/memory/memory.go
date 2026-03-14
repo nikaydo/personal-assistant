@@ -20,6 +20,7 @@ import (
 const (
 	defaultLongTermTopK = 6
 	maxLongTermTopK     = 8
+	minLongTermRetrievalBudget = 64
 )
 
 var createEmbeddingFn = llmcalls.CreateEmbending
@@ -268,26 +269,10 @@ func (m *Memory) PlanContextBudget(question string) (ContextBudgetPlan, int) {
 }
 
 func (m *Memory) prepareLongTermMemoryMessage(question string, shortTermCount, tokenBudget int, opts BuildOptions) (string, int, int, bool, string) {
-	enabled, reason := m.shouldRetrieveLongTerm(question, shortTermCount, opts)
+	enabled, reason := m.shouldRetrieveLongTerm(question, tokenBudget, opts)
 	if !enabled {
 		m.Logger.Memory("LongTermMemoryFill: adaptive retrieval disabled", "reason", reason)
 		return "", 0, 0, false, reason
-	}
-	if tokenBudget <= 0 {
-		m.Logger.Memory("LongTermMemoryFill: token budget exhausted")
-		return "", 0, 0, false, "budget_exhausted"
-	}
-	if m.Tokens.LongTermLimit == 0 {
-		m.Logger.Memory("LongTermMemoryFill: long-term memory is disabled, skipping long-term memory in context")
-		return "", 0, 0, false, "long_term_limit_disabled"
-	}
-	if question == "" {
-		m.Logger.Memory("LongTermMemoryFill: question is empty, skipping long-term memory in context")
-		return "", 0, 0, false, "question_empty"
-	}
-	if m.DBase == nil {
-		m.Logger.Memory("LongTermMemoryFill: database is nil, skipping long-term memory in context")
-		return "", 0, 0, false, "db_nil"
 	}
 
 	emb, err := createEmbeddingFn(question, m.Cfg)
@@ -314,36 +299,24 @@ func (m *Memory) prepareLongTermMemoryMessage(question string, shortTermCount, t
 	return content, tokens, symbols, true, reason
 }
 
-func (m *Memory) shouldRetrieveLongTerm(question string, shortTermCount int, opts BuildOptions) (bool, string) {
+func (m *Memory) shouldRetrieveLongTerm(question string, tokenBudget int, opts BuildOptions) (bool, string) {
 	if !opts.IncludeLongTerm {
 		return false, "long_term_disabled_by_options"
 	}
-	q := strings.TrimSpace(strings.ToLower(question))
+	q := strings.TrimSpace(question)
 	if q == "" {
 		return false, "empty_question"
 	}
-	if len(q) > 120 {
-		return true, "long_question"
+	if tokenBudget < minLongTermRetrievalBudget {
+		return false, "budget_below_threshold"
 	}
-	if shortTermCount == 0 {
-		return true, "no_short_term_context"
+	if m.Tokens.LongTermLimit == 0 {
+		return false, "long_term_limit_disabled"
 	}
-	if shortTermCount <= 2 {
-		return true, "limited_short_term_context"
+	if m.DBase == nil {
+		return false, "db_nil"
 	}
-	if len(q) < 24 {
-		return false, "short_local_question"
-	}
-	referenceMarkers := []string{
-		"remember", "previous", "earlier", "before", "you said",
-		"напомни", "раньше", "до этого", "ты говорил", "предыдущ",
-	}
-	for _, marker := range referenceMarkers {
-		if strings.Contains(q, marker) {
-			return true, "historical_reference"
-		}
-	}
-	return false, "short_term_sufficient"
+	return true, "enabled_by_budget_policy"
 }
 
 func (m *Memory) dynamicLongTermTopK(question string, shortTermCount int) int {
